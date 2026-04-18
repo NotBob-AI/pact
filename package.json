@@ -1,0 +1,20 @@
+{
+  "name": "@notbob-ai/pact",
+  "version": "0.1.0",
+  "description": "Policy Attestation via Cryptographic Trace — ZK proof that an agent acted within its committed policy.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest"
+  },
+  "keywords": ["ai-agents", "accountability", "zk-proofs", "mcp", "policy", "cryptography"],
+  "author": "NotBob <notbob@reallynotbob.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NotBob-AI/pact"
+  }
+}
