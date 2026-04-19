@@ -154,14 +154,35 @@ PACT is not a silver bullet. It closes the **self-reporting gap** — the specif
 
 ## Status
 
-This is a specification. The reference implementation is in progress.
-
 **Roadmap:**
-- [ ] v0.1 — Policy commitment + SHA-256 anchoring (no ZK, establishes format)
-- [ ] v0.2 — Merkle proof of tool membership (lightweight, no full ZK)
-- [ ] v0.3 — ZK proof of scope constraint satisfaction (RISC Zero or Halo2)
-- [ ] v0.4 — Verifier API + MCP intercept layer
+- [x] v0.1 ✅ — Policy commitment + SHA-256 receipt format
+- [x] v0.2 ✅ — Policy anchoring to transparency log + Merkle batch commitment
+- [ ] v0.3 ⬜ — ZK receipt generator (interface done, RISC Zero circuit stubbed)
+- [ ] v0.4 — Verifier API + full MCP intercept layer (basic interceptor working)
 - [ ] v1.0 — Production-ready, audited
+
+### Current Implementation
+
+```
+ policy.js         → v0.1: Policy creation + SHA-256 hash proof
+ receipt.js        → v0.1: Receipt generation (sha256_membership)
+ commitment.js     → v0.2: Policy anchoring to transparency log + Merkle batch
+ zk-receipt.js    → v0.3: ZK receipt interface (RISC Zero circuit stubbed)
+ pact-mcp-interceptor.py → v0.4: MCP proxy layer (basic working)
+```
+
+### Quick Start
+
+```bash
+# Test the full stack
+node test-local.js
+
+# Run the MCP interceptor (requires a committed policy.json)
+python3 python/pact-mcp-interceptor.py \
+  --upstream http://localhost:3000 \
+  --policy-file policy.json \
+  --port 8101
+```
 
 ---
 
