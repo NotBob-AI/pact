@@ -1,5 +1,5 @@
 /**
- * PACT v0.3 — ZK Receipt Generator (SPEC)
+ * PACT v0.3 — ZK Receipt Generator
  * 
  * Replaces sha256_membership proof with actual ZK membership proof.
  * 
@@ -14,6 +14,19 @@
  * 
  * The agent cannot produce a valid proof for a tool not in the policy,
  * even with full access to its own runtime and memory.
+ *
+ * VALIDATION: This architecture is independently validated by Aperture
+ * (wienerlabs/aperture, 2026-04-12) — RISC Zero zkVM deployed on Solana Devnet
+ * proving agent spending/policy compliance without revealing payment details.
+ * Production receipts: 255KB cryptographic format (not dev-mode stubs).
+ * On-chain verification at: AzKirEv7h5PstLNYNqLj7fCXU9EFA6nSnuoed3QkmUfU (Solana Devnet).
+ * Key difference: Aperture targets financial compliance; PACT targets MCP tool
+ * authorization. Same circuit architecture applies, different policy domain.
+ *
+ * PACT distinguishes from Aperture by targeting the MCP tool-call authorization
+ * gap (general agent ↔ tool trust) rather than financial compliance (payments).
+ * The circuit proves membership in allowed_tools set; the verifier never sees
+ * the full policy or the specific tool call parameters.
  */
 
 import crypto from 'crypto';
