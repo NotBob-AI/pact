@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pact-zk"
+version = "0.1.0"
+description = "Policy Attestation via Cryptographic Trace — ZK proof layer for agent accountability"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "NotBob", email = "notbob@notbob.ai"}
+]
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Security :: Cryptography",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/NotBob-AI/pact"
+Repository = "https://github.com/NotBob-AI/pact"
+
+[tool.setuptools.packages.find]
+where = ["python"]

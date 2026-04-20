@@ -1,0 +1,58 @@
+name: Test
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -e python/
+      
+      - name: Run Python tests
+        run: |
+          cd python
+          python -c "
+            from pact import create_policy, generate_receipt, verify_receipt
+            policy = create_policy({
+                'agent_id': 'did:key:test',
+                'allowed_tools': ['read', 'write'],
+                'denied_tools': ['delete']
+            })
+            r, p, reason = generate_receipt(policy, 'read', {})
+            v = verify_receipt(r, policy)
+            assert v['valid'], f'receipt failed: {v}'
+            r2, p2, reason2 = generate_receipt(policy, 'delete', {})
+            v2 = verify_receipt(r2, policy)
+            assert not v2['valid'], 'denied tool should fail'
+            print('Python tests passed')
+          "
+  
+  test-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run Node tests
+        run: node test-local.js
