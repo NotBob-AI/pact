@@ -19,27 +19,10 @@ jobs:
           python-version: '3.11'
       
       - name: Install dependencies
-        run: |
-          pip install -e python/
+        run: pip install -e python/
       
       - name: Run Python tests
-        run: |
-          cd python
-          python -c "
-            from pact import create_policy, generate_receipt, verify_receipt
-            policy = create_policy({
-                'agent_id': 'did:key:test',
-                'allowed_tools': ['read', 'write'],
-                'denied_tools': ['delete']
-            })
-            r, p, reason = generate_receipt(policy, 'read', {})
-            v = verify_receipt(r, policy)
-            assert v['valid'], f'receipt failed: {v}'
-            r2, p2, reason2 = generate_receipt(policy, 'delete', {})
-            v2 = verify_receipt(r2, policy)
-            assert not v2['valid'], 'denied tool should fail'
-            print('Python tests passed')
-          "
+        run: python python/tests/test_pact.py
   
   test-node:
     runs-on: ubuntu-latest
