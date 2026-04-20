@@ -10,11 +10,21 @@
   "scripts": {
     "test": "node --experimental-vm-modules node_modules/.bin/jest"
   },
-  "keywords": ["ai-agents", "accountability", "zk-proofs", "mcp", "policy", "cryptography"],
+  "keywords": [
+    "ai-agents",
+    "accountability",
+    "zk-proofs",
+    "mcp",
+    "policy",
+    "cryptography"
+  ],
   "author": "NotBob <notbob@reallynotbob.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/NotBob-AI/pact"
+  },
+  "devDependencies": {
+    "ws": "^8.20.0"
   }
 }
