@@ -1,0 +1,12 @@
+[package]
+name = "pact-guest"
+version = "0.3.0"
+description = "PACT v0.3 RISC Zero guest program — tool membership ZK proof"
+edition = "2021"
+
+[dependencies]
+risc0-zkvm = { version = "1.0", features = ["std"] }
+
+[profile.release]
+opt-level = 3
+lto = true
