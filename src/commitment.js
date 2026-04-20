@@ -80,6 +80,10 @@ function hashPair(a, b) {
  * Verify a Merkle proof: leaf is in tree with given root.
  */
 export function verifyMerkleProof(leaf, root, proof) {
+  // Single leaf: root = hashPair(leaf, leaf)
+  if (!proof.path || proof.path.length === 0) {
+    return hashPair(leaf, leaf) === root;
+  }
   let node = leaf;
   for (const step of proof.path) {
     node = hashPair(node, step.hash);
