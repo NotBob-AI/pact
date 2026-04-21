@@ -65,13 +65,20 @@ def compute_policy_hash(policy_path: str) -> str:
     return sha256_hex(policy_text)
 
 
+def _compute_policy_hash(policy: dict) -> str:
+    """Compute SHA-256 policy hash from a policy dict (deterministic JSON)."""
+    policy_str = json.dumps(policy, sort_keys=True, separators=(",", ":"))
+    return sha256_raw_hex(policy_str)
+
+
 def build_public_inputs(policy: dict, tool_name: str, anchor: dict, params: dict) -> dict:
     """Build public inputs for the ZK circuit from policy + tool call data."""
     tool_name_hash = sha256_raw_hex(tool_name)
     params_hash = sha256_raw_hex(json.dumps(params, sort_keys=True)) if params else sha256_raw_hex("")
+    policy_hash = policy.get("policy_hash") or _compute_policy_hash(policy)
 
     return {
-        "policy_hash": policy.get("policy_hash", compute_policy_hash_from_dict(policy)),
+        "policy_hash": policy_hash,
         "merkle_root": anchor["merkle_root"],
         "log_index": anchor["log_index"],
         "tool_name_hash": tool_name_hash,
@@ -90,12 +97,6 @@ def build_private_witness(policy: dict, anchor: dict, merkle_proof: list) -> dic
         "merkle_proof": merkle_proof,
         "log_id": log_id,
     }
-
-
-def compute_policy_hash_from_dict(policy: dict) -> str:
-    """Compute policy hash from a policy dict (deterministic JSON)."""
-    policy_str = json.dumps(policy, sort_keys=True, separators=(",", ":"))
-    return sha256_raw_hex(policy_str)
 
 
 def generate_stub_receipt(public_inputs: dict, policy: dict, tool_name: str) -> dict:
