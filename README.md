@@ -157,18 +157,21 @@ PACT is not a silver bullet. It closes the **self-reporting gap** — the specif
 **Roadmap:**
 - [x] v0.1 ✅ — Policy commitment + SHA-256 receipt format
 - [x] v0.2 ✅ — Policy anchoring to transparency log + Merkle batch commitment
-- [ ] v0.3 ⬜ — ZK receipt generator (interface done, RISC Zero circuit stubbed)
-- [ ] v0.4 — Verifier API + full MCP intercept layer (basic interceptor working)
+- [x] v0.3 ✅ — ZK receipt generator (Python host module + RISC Zero guest circuit, DUMMY_PROOF fallback)
+- [x] Layer 0 ✅ — MCP interceptor (WS + stdio interfaces, policy enforcement, receipt generation)
+- [ ] v0.4 — Verifier API + full MCP intercept layer production deployment
 - [ ] v1.0 — Production-ready, audited
 
 ### Current Implementation
 
 ```
- policy.js         → v0.1: Policy creation + SHA-256 hash proof
- receipt.js        → v0.1: Receipt generation (sha256_membership)
- commitment.js     → v0.2: Policy anchoring to transparency log + Merkle batch
- zk-receipt.js    → v0.3: ZK receipt interface (RISC Zero circuit stubbed)
- pact-mcp-interceptor.py → v0.4: MCP proxy layer (basic working)
+ python/policy.js       → v0.1: Policy creation + SHA-256 hash proof
+ python/receipt.js      → v0.1: Receipt generation (sha256_membership)
+ python/commitment.js   → v0.2: Policy anchoring to transparency log + Merkle batch
+ python/zk-receipt.js  → v0.3: ZK receipt interface
+ python/zk_host.py     → v0.3: RISC Zero host module (Python, bridges to Rust guest)
+ rust/guest/main.rs    → v0.3: RISC Zero guest circuit (tool membership proof)
+ src/interceptor.js     → Layer 0: MCP proxy layer (WS + stdio, policy enforcement)
 ```
 
 ### Quick Start
@@ -185,6 +188,15 @@ python3 python/pact-mcp-interceptor.py \
 ```
 
 ---
+
+## Standards Alignment
+
+PACT's Layer 2 (ZK receipt generator) and Layer 1 (policy anchoring) compose with the **IETF SCITT AI Agent Execution** draft ([draft-emirdag-scitt-ai-agent-execution-00](https://datatracker.ietf.org/doc/draft-emirdag-scitt-ai-agent-execution/), April 2026):
+- SCITT defines the receipt envelope (COSE Sign1) and transparency log composition for AI agent execution traces
+- PACT defines the proof generation: ZK membership that the specific tool call ∈ committed policy
+- **Together**: SCITT handles the envelope and log attestation; PACT handles the cryptographic proof that the action was within bounds the agent could not see at execution time
+
+This convergence across two independent implementations (PACT + IETF SCITT draft) within the same 60-day window validates the architectural approach: agent accountability requires a verification regime where the verifier does not need to retain sensitive context.
 
 ## Authors
 
