@@ -122,7 +122,7 @@ def sign_receipt(receipt: dict, ed25519_private_key_b64: str) -> dict:
     receipt["proof"]["signature"] = base64.b64encode(signature).decode()
     receipt["proof"]["verifier_key"] = base64.b64encode(
         public_key.public_bytes(
-            encoding=serialization.PublicFormat.Raw,
+            encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
     ).decode()
