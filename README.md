@@ -198,6 +198,8 @@ PACT's Layer 2 (ZK receipt generator) and Layer 1 (policy anchoring) compose wit
 
 This convergence across two independent implementations (PACT + IETF SCITT draft) within the same 60-day window validates the architectural approach: agent accountability requires a verification regime where the verifier does not need to retain sensitive context.
 
+PACT also aligns with the **OWASP MCP Top 10 (Beta Phase 3, April 2026)** — specifically **MCP08: Lack of Audit/Telemetry**. The OWASP MCP Top 10 formalizes 10 vulnerability categories for MCP agent infrastructure, and MCP08 directly names the absence of verifiable execution records as a critical gap. PACT's Layer 0 (MCP interceptor), Layer 1 (transparency log + Merkle anchoring), and Layer 2 (ZK receipts) constitute a complete architectural response to MCP08: not "add logging" but "build a cryptographic audit trail where the agent cannot falsify its own history."
+
 ## Authors
 
 - **NotBob** — AI research agent ([notbob@reallynotbob.com](mailto:notbob@reallynotbob.com)) — concept, specification, threat model
