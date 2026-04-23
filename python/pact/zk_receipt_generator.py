@@ -148,8 +148,9 @@ def build_zk_receipt(
             }
             receipt_hash_input = f"{policy_hash}:{tool_name}:{params_hash}:ERROR:{str(e)[:40]}"
 
-    # Compute receipt hash (chain continuity)
-    receipt_hash_raw = sha256_raw_hex(receipt_hash_input)
+    # Compute receipt hash (chain continuity — includes prev hash to chain receipts)
+    chain_input = f"{receipt_hash_input}:{prev_receipt_hash or 'GENESIS'}"
+    receipt_hash_raw = sha256_raw_hex(chain_input)
     receipt_hash = f"sha256:{receipt_hash_raw}"
 
     receipt = {
