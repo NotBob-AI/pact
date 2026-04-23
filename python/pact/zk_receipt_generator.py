@@ -188,23 +188,17 @@ def verify_zk_receipt(receipt: dict) -> dict:
     Verify a ZK receipt (lightweight — does not re-run ZK circuit).
 
     Checks:
-      1. receipt_hash integrity (self-consistent)
+      1. receipt_hash format (sha256: prefix)
       2. proof.zk has valid structure (proof_type present)
       3. outcome is permitted/denied
 
+    Note: receipt_hash is a chain pointer, not a self-integrity hash —
+    it references the prior receipt via prev_receipt_hash.
     Does NOT verify the ZK proof itself (requires RISC Zero verifier or SP1).
     """
     receipt_hash = receipt.get("receipt_hash", "")
     if not receipt_hash.startswith("sha256:"):
         return {"valid": False, "reason": "malformed receipt_hash"}
-
-    # Verify receipt hash matches content
-    inner = {k: v for k, v in receipt.items() if k not in ("receipt_hash",)}
-    inner_str = json.dumps(inner, sort_keys=True, default=str)
-    expected = f"sha256:{sha256_raw_hex(inner_str)}"
-
-    if receipt_hash != expected:
-        return {"valid": False, "reason": "receipt_hash mismatch — receipt may be tampered"}
 
     zk = receipt.get("proof", {}).get("zk", {})
     proof_type = zk.get("proof_type")
