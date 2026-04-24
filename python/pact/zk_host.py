@@ -33,11 +33,12 @@ Usage (import):
 """
 
 import argparse
-import json
+import asyncio
 import hashlib
+import json
 import os
-import sys
 import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -318,7 +319,7 @@ def main():
             params = json.load(f)
 
     # Generate
-    receipt = asyncio_generate_zk_receipt(policy, args.tool, anchor, merkle_proof, params)
+    receipt = asyncio.run(generate_zk_receipt(policy, args.tool, anchor, merkle_proof, params))
 
     output_path = args.output or str(PROOF_OUTPUT_PATH)
     with open(output_path, "w") as f:
@@ -331,12 +332,6 @@ def main():
 
     if receipt.get("proof", {}).get("stub"):
         print("\nWARNING: Stub proof — RISC Zero not available. NOT for production.")
-
-
-def asyncio_generate_zk_receipt(policy, tool_name, anchor, merkle_proof, params=None):
-    """Synchronous wrapper for use outside async context."""
-    import asyncio
-    return asyncio.run(generate_zk_receipt(policy, tool_name, anchor, merkle_proof, params))
 
 
 if __name__ == "__main__":
