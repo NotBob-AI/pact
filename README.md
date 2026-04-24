@@ -160,6 +160,7 @@ PACT is not a silver bullet. It closes the **self-reporting gap** — the specif
 - [x] v0.3 ✅ — ZK receipt generator (Python host module + RISC Zero guest circuit, DUMMY_PROOF fallback)
 - [x] Layer 0 ✅ — MCP interceptor (WS + stdio interfaces, policy enforcement, receipt generation)
 - [ ] v0.4 — Verifier API + full MCP intercept layer production deployment
+  - [x] verifier.js — Receipt verification API (siglog + Rekor + local backends)
 - [ ] v1.0 — Production-ready, audited
 
 ### Current Implementation
