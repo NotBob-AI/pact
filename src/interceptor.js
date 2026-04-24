@@ -38,6 +38,7 @@ import https from 'https';
 import { WebSocketServer } from 'ws';
 import { checkToolCall } from './policy.js';
 import { generateReceipt } from './receipt.js';
+import { generateZkReceipt } from './zk-receipt.js';
 import crypto from 'crypto';
 
 const MCP_VERSION = '2024-11-05';
@@ -80,19 +81,23 @@ export class McpInterceptor {
    * @param {string} [config.host='localhost'] - Host for interceptor
    * @param {boolean} [config.allowUnaudited=false] - If true, forward calls without matching policy rule (dangerous)
    */
-  constructor({ policy, anchor, upstreamUrl, port = 3101, host = 'localhost', allowUnaudited = false }) {
+    constructor({ policy, anchor, upstreamUrl, merkleProof = null, port = 3101, host = 'localhost', allowUnaudited = false, useZkReceipts = false }) {
     this.policy = policy;
     this.anchor = anchor;
     this.upstreamUrl = upstreamUrl;
+    this.merkleProof = merkleProof;
     this.port = port;
     this.host = host;
     this.allowUnaudited = allowUnaudited;
+    this.useZkReceipts = useZkReceipts;
+
 
     this.receipts = [];           // All generated receipts
     this.callCount = 0;           // Monotonic counter per session
     this.upstreamWs = null;       // WebSocket to real MCP server
     this.agentWs = null;          // WebSocket to agent
     this.sessionId = `pact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
 
     this.server = null;
     this.wss = null;
@@ -271,12 +276,26 @@ export class McpInterceptor {
       return { drop: true, toolName, reason: policyCheck.reason };
     }
 
-    // Generate PACT receipt for permitted call
-    const { receipt } = generateReceipt({
-      policy: this.policy,
-      toolName,
-      params: toolArgs,
-    });
+    // Generate PACT v0.3 ZK receipt for permitted call
+    // ZK receipt proves tool_call ∈ committed_policy without revealing params or policy
+    let receipt;
+    if (this.useZkReceipts) {
+      const { zk_receipt } = await generateZkReceipt({
+        policy: this.policy,
+        toolName,
+        anchor: this.anchor,
+        merkleProof: this.merkleProof,
+        params: toolArgs,
+      });
+      receipt = zk_receipt;
+    } else {
+      const { receipt: v01 } = generateReceipt({
+        policy: this.policy,
+        toolName,
+        params: toolArgs,
+      });
+      receipt = v01;
+    }
 
     // Enrich with PACT-specific metadata
     receipt.action_id = callId;
