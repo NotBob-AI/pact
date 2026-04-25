@@ -31,6 +31,43 @@ def health():
     return jsonify({"status": "ok", "service": "pact-verifier"})
 
 
+@app.route("/agent/<agent_id>/receipts")
+def get_agent_receipts(agent_id: str):
+    """
+    List all verified receipts for an agent_id.
+    v0.4: third parties query accountability without agent cooperation.
+    Returns receipts sorted by timestamp, most recent first.
+    """
+    receipts_dir = RECEIPTS_DIR
+    if not receipts_dir.exists():
+        return jsonify({"error": "receipts directory not configured", "agent_id": agent_id}), 500
+
+    receipts = []
+    for receipt_file in receipts_dir.glob(f"{agent_id}_*.json"):
+        try:
+            receipt = json.loads(receipt_file.read_text())
+            result = verify_receipt(receipt)
+            receipts.append({
+                "action_id": receipt.get("action_id"),
+                "receipt_version": receipt.get("receipt_version", "0.1"),
+                "tool_called": receipt.get("tool_called"),
+                "policy_hash": receipt.get("policy_hash"),
+                "timestamp": receipt.get("timestamp"),
+                "outcome": receipt.get("outcome"),
+                "verification": result,
+            })
+        except (json.JSONDecodeError, IOError):
+            continue
+
+    receipts.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return jsonify({
+        "agent_id": agent_id,
+        "count": len(receipts),
+        "receipts": receipts,
+    })
+
+
+
 @app.route("/receipt/<action_id>")
 def get_receipt(action_id: str):
     """Load and verify a receipt by action_id."""
