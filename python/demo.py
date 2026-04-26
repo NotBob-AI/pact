@@ -169,7 +169,7 @@ def start_verifier_api(port: int):
                 })
             except (json.JSONDecodeError, IOError):
                 continue
-        receipts.sort(key=lambda x: x.get("action_id", ""), reverse=True)
+        receipts.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         return {"agent_id": agent_id, "count": len(receipts), "receipts": receipts}
 
     @app.route("/receipt/<action_id>")
@@ -204,6 +204,9 @@ def start_verifier_api(port: int):
         }
 
     from flask import request
+    import os
+    # Pass receipts dir to the env so the standalone verifier_api.py also uses it
+    os.environ["PACT_RECEIPTS_DIR"] = str(RECEIPTS_DIR)
     thread = threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port, debug=False), daemon=True)
     thread.start()
     return thread
