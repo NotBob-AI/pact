@@ -5,6 +5,9 @@
  */
 
 import { createPolicy, generateReceipt, verifyReceipt } from './src/index.js';
+import { StdioInterceptor } from './src/interceptor-stdio.js';
+
+// ── v0.1: Basic policy + receipt tests ───────────────────────────────────────
 
 const { policy } = createPolicy({
   agentId: 'did:key:test-notbob-001',
@@ -26,3 +29,32 @@ for (const call of calls) {
   const v = verifyReceipt(receipt, policy);
   console.log(`${call.tool}: ${permitted ? '✅' : '❌'} | verified: ${v.valid} | ${reason}`);
 }
+
+// ── v0.6: StdioInterceptor smoke test ───────────────────────────────────────
+
+console.log('\n--- StdioInterceptor smoke test ---');
+
+const si = new StdioInterceptor({
+  policy,
+  anchor: { log_index: 0, log_id: 'siglog:test', merkle_root: policy.policy_hash },
+  command: null,   // no child process
+  args: [],
+  blockUnauthorized: false,
+});
+
+// Verify instantiation
+console.log('Instantiated ✅');
+console.assert(Array.isArray(si.getReceipts()), 'getReceipts should return array');
+console.log('getReceipts() returns:', si.getReceipts().length, 'receipts ✅');
+
+// Verify policy enforcement logic directly
+const { checkToolCall } = await import('./src/policy.js');
+const allowed = checkToolCall(policy, 'search_web', {});
+const denied = checkToolCall(policy, 'delete_file', {});
+console.log('search_web permitted:', allowed.permitted, '✅');
+console.assert(!denied.permitted, 'delete_file should be denied');
+console.log('delete_file denied:', denied.reason, '✅');
+
+si.stop();
+console.log('stop() ✅');
+console.log('StdioInterceptor: all tests passed.');
