@@ -47,6 +47,33 @@ from typing import Optional
 DUMMY_PROOF = os.environ.get("DUMMY_PROOF", "0") == "1"
 RISC0_GUEST_DIR = Path(__file__).parent.parent / "rust" / "guest"
 PROOF_OUTPUT_PATH = Path("/tmp/pact-zk-proof.json")
+GUEST_VERSION = "0.3.0"
+CIRCUIT_ID = "pact-v0.3-tool-membership"
+
+
+def _check_risc0_environment() -> dict:
+    """
+    Diagnostic check for RISC Zero availability.
+    Returns diagnostics dict with availability flags and fix instructions.
+    """
+    import shutil
+    result = {
+        "risc0_available": False,
+        "rz_binary": bool(shutil.which("rz") or shutil.which("cargo-risczero")),
+        "guest_binary": (RISC0_GUEST_DIR / "target" / "release" / "pact-guest").exists(),
+        "image_id_file": (Path(__file__).parent / "risc0_image_id.txt").exists(),
+        "diagnosis": [],
+    }
+    if not result["rz_binary"]:
+        result["diagnosis"].append(
+            "rz/cargo-risczero not on PATH — run: curl -fsSL https://risczero.com/install.sh | bash && source ~/.risc0/env"
+        )
+    if not result["guest_binary"]:
+        result["diagnosis"].append(
+            f"guest binary not found — run: cd rust/guest && cargo build --release"
+        )
+    result["risc0_available"] = result["rz_binary"] and result["guest_binary"]
+    return result
 
 
 def sha256_hex(data: str) -> str:
@@ -121,7 +148,8 @@ def generate_stub_receipt(public_inputs: dict, policy: dict, tool_name: str) -> 
     stub_receipt = {
         "receipt_version": "0.3.0",
         "proof_type": "zk_membership",
-        "circuit_id": "pact-v0.3-tool-membership",
+        "circuit_id": CIRCUIT_ID,
+        "guest_version": GUEST_VERSION,
         "proof_encoding": "risc0_receipt_v1",
         "public": public_inputs,
         "proof": {
@@ -131,6 +159,7 @@ def generate_stub_receipt(public_inputs: dict, policy: dict, tool_name: str) -> 
             "stub_reason": "DUMMY_PROOF mode — RISC Zero not available",
             "circuit_output": circuit_output,
             "proof_id": proof_id,
+            "rz_diagnosis": _check_risc0_environment()["diagnosis"],
         },
         "outcome": "permitted",
         "outcome_reason": "tool_name ∈ policy.allowed_tools[proof]",
@@ -139,6 +168,9 @@ def generate_stub_receipt(public_inputs: dict, policy: dict, tool_name: str) -> 
             "risc0_available": False,
             "dummy_proof": True,
             "guest_image_id": _get_guest_image_id(),
+            "environment": {
+                k: v for k, v in _check_risc0_environment().items() if k != "diagnosis"
+            },
         },
     }
 
@@ -259,6 +291,23 @@ def verify_zk_receipt(receipt: dict) -> dict:
 
     if receipt.get("proof_type") != "zk_membership":
         return {"valid": False, "reason": "wrong proof type"}
+
+    # Circuit ID compatibility check
+    receipt_circuit_id = receipt.get("circuit_id", "")
+    if receipt_circuit_id and receipt_circuit_id != CIRCUIT_ID:
+        return {
+            "valid": False,
+            "reason": f"circuit mismatch: receipt={receipt_circuit_id}, host={CIRCUIT_ID}",
+        }
+
+    # Guest version check — fail if stub receipt has different guest version
+    if receipt.get("proof", {}).get("stub"):
+        guest_v = receipt.get("guest_version", "unknown")
+        if guest_v != GUEST_VERSION:
+            return {
+                "valid": False,
+                "reason": f"guest version mismatch: receipt={guest_v}, host={GUEST_VERSION}",
+            }
 
     public = receipt.get("public", {})
     required_fields = ["policy_hash", "log_index", "merkle_root", "tool_name_hash"]
