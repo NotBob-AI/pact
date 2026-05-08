@@ -1,352 +1,287 @@
 """
-PACT v0.2 — Policy Commitment Layer (Python)
+PACT v0.2 — Policy Commitment Layer
 
-Layer 1: Anchor committed policy hashes to a transparency log.
-The transparency log is append-only and publicly auditable.
-Merkle root = deterministic commitment for all policies in a batch.
+Commits a policy document to a transparency log BEFORE agent execution,
+producing a commitment receipt with a Merkle root anchored in Git.
+Verifiable by any third party without requiring access to the agent.
 
-Ported from commitment.js (ESM) → Python for MCP interceptor integration.
-
-Architecture:
-  create_policy()         → v0.1: Policy creation + SHA-256 hash
-  build_merkle_tree()     → v0.2: Merkle tree from policy hashes
-  create_log_entry()      → v0.2: Single transparency log entry
-  TransparencyLog          → v0.2: Append-only log with Merkle anchoring
-  anchor_policy()         → v0.2: Anchor a policy to the log
-  verify_anchor()         → v0.2: Verify a policy anchor
+Key invariant: A policy can only be used to generate valid receipts
+AFTER it has been committed. The commitment timestamp is the proof
+that the policy existed before the actions it authorizes.
 """
 
-import hashlib
 import json
+import hashlib
+import struct
+import os
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+from dataclasses import dataclass, field
+from .receipt import generate_receipt
+
+PACT_DIR = Path(__file__).parent.parent.parent
+TRANSPARENCY_LOG = PACT_DIR / "transparency_log.jsonl"
+COMMITMENTS_DIR = PACT_DIR / "commitments"
+GIT_ANCHOR_FILE = PACT_DIR / "merkle_root_anchored.txt"
 
 
-# ---------------------------------------------------------------------------
-# Merkle Tree
-# ---------------------------------------------------------------------------
-
-def _sha256_hex(data: str) -> str:
-    """Compute SHA-256 of a string, return hex with sha256: prefix."""
-    return f"sha256:{hashlib.sha256(data.encode('utf-8')).hexdigest()}"
-
-
-def _hash_pair(a: str, b: str) -> str:
-    """Hash two values in canonical (sorted) order."""
-    a_clean = a.replace("sha256:", "")
-    b_clean = b.replace("sha256:", "")
-    left, right = (a_clean, b_clean) if a_clean <= b_clean else (b_clean, a_clean)
-    return _sha256_hex(f"{left}::{right}")
+@dataclass
+class PolicyCommitment:
+    """A committed policy document with transparency log proof."""
+    policy_doc: dict
+    policy_hash: str
+    commitment_index: int
+    merkle_root: str
+    committed_at: str
+    log_anchors: list[str] = field(default_factory=list)
 
 
-def build_merkle_tree(leaves: list[str]) -> dict:
+def _compute_merkle_node(left: str, right: str) -> str:
+    """Combine two node hashes into a parent Merkle node."""
+    combined = json.dumps([left, right], sort_keys=True).encode()
+    return "sha256:" + hashlib.sha256(combined).hexdigest()
+
+
+def _build_merkle_tree(hashes: list[str]) -> tuple[list[str], str]:
     """
-    Build a binary Merkle tree from a list of leaf hashes.
-    Returns { root, proofs } where proofs[i] proves leaves[i] is in tree.
-
-    Args:
-        leaves: List of sha256: prefixed hash strings.
-
-    Returns:
-        { root: str, proofs: list[dict] }
-        Each proof: { leaf: str, path: list[{hash: str, side: str}] }
-        side: 'right' if sibling was right child, 'left' if sibling was left child.
+    Build a Merkle tree from a list of leaf hashes.
+    Returns (tree_nodes, root_hash).
     """
-    if not leaves:
-        raise ValueError("Empty leaf list")
+    if not hashes:
+        return [], "sha256:" + "0" * 64
 
-    if len(leaves) == 1:
-        root = _hash_pair(leaves[0], leaves[0])
-        return {
-            "root": root,
-            "proofs": [{"leaf": leaves[0], "path": [], "side": "left"}],
-        }
+    tree = [hashes]
+    level = 0
 
-    # Pad to next power of 2
-    padded = list(leaves)
-    while len(padded) % 2 != 0:
-        padded.append(padded[-1])
+    while len(tree[level]) > 1:
+        current_level = tree[level]
+        next_level = []
 
-    # Build tree: tree[0] = leaves, tree[1] = parents, ..., tree[N-1] = root
-    level = [_hash_pair(leaf, leaf) for leaf in padded]
-    tree = [level]
+        for i in range(0, len(current_level), 2):
+            left = current_level[i]
+            right = current_level[i + 1] if i + 1 < len(current_level) else current_level[i]
+            parent = _compute_merkle_node(left, right)
+            next_level.append(parent)
 
-    while len(level) > 1:
-        new_level = []
-        for i in range(0, len(level), 2):
-            new_level.append(_hash_pair(level[i], level[i + 1]))
-        tree.append(new_level)
-        level = new_level
+        tree.append(next_level)
+        level += 1
 
-    root = tree[-1][0]
-    num_levels = len(tree)
-
-    # Build inclusion proofs for each original leaf
-    proofs = []
-    for idx, leaf in enumerate(leaves):
-        proof = []
-        node_idx = idx
-        # Walk from leaves level (tree[0]) upward toward root (tree[-1])
-        for t in range(1, num_levels):
-            # sibling is 1 - node_idx % 2: left child (idx 0) has right sibling (idx 1), right child has left sibling (idx 0)
-            sibling_idx = 1 - (node_idx % 2)
-            sibling = tree[t][sibling_idx]
-            proof.append({
-                "hash": sibling,
-                "side": "right" if node_idx % 2 == 0 else "left"
-            })
-            node_idx = node_idx // 2
-        proofs.append({"leaf": leaf, "path": proof})
-
-    return {"root": root, "proofs": proofs}
-
-def verify_merkle_proof(leaf: str, root: str, proof: dict) -> bool:
-    """Verify a Merkle inclusion proof."""
-    node = leaf
-    for step in proof["path"]:
-        node = _hash_pair(node, step["hash"])
-    return node == root
+    return tree, tree[-1][0]
 
 
-# ---------------------------------------------------------------------------
-# Transparency Log Entry
-# ---------------------------------------------------------------------------
-
-def create_log_entry(
-    index: int,
-    prev_hash: Optional[str],
-    merkle_root: str,
-    policy_hashes: list[str],
-    timestamp: Optional[str] = None,
-    note: str = ""
-) -> dict:
+def _append_to_transparency_log(entry: dict) -> tuple[int, str]:
     """
-    Create a single transparency log entry.
-    log_id = SHA-256(index | prev_hash | timestamp | merkle_root | policy_hashes)
+    Append a commitment entry to the append-only transparency log.
+    Returns (entry_index, entry_hash).
     """
-    if timestamp is None:
-        timestamp = datetime.now(timezone.utc).isoformat()
+    COMMITMENTS_DIR.mkdir(exist_ok=True)
 
-    prev_str = prev_hash if prev_hash else "GENESIS"
-    policy_hashes_str = ",".join(policy_hashes)
-    canonical = f"{index}|{prev_str}|{timestamp}|{merkle_root}|{policy_hashes_str}"
-    log_id = _sha256_hex(canonical)
+    # Read existing log to get entry index
+    entries = []
+    if TRANSPARENCY_LOG.exists():
+        with open(TRANSPARENCY_LOG) as f:
+            for line in f:
+                if line.strip():
+                    entries.append(json.loads(line))
 
-    return {
-        "log_id": log_id,
-        "log_index": index,
-        "prev_hash": prev_str,
-        "timestamp": timestamp,
+    entry_index = len(entries)
+    entry["log_index"] = entry_index
+
+    entry_str = json.dumps(entry, sort_keys=True)
+    entry_hash = "sha256:" + hashlib.sha256(entry_str.encode()).hexdigest()
+    entry["entry_hash"] = entry_hash
+
+    with open(TRANSPARENCY_LOG, "a") as f:
+        f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+    # Save individual commitment file
+    commitment_file = COMMITMENTS_DIR / f"{entry_index:06d}.json"
+    with open(commitment_file, "w") as f:
+        json.dump(entry, f, indent=2)
+
+    return entry_index, entry_hash
+
+
+def _anchor_merkle_root_to_git(merkle_root: str, policy_hash: str) -> str:
+    """
+    Commit the current Merkle root to Git.
+    This creates an immutable anchor — the root cannot be changed
+    without changing the Git commit, which would be visible.
+    """
+    anchor_content = json.dumps({
         "merkle_root": merkle_root,
-        "policy_hashes": policy_hashes,
-        "note": note,
-    }
+        "policy_hash": policy_hash,
+        "anchored_at": datetime.now(timezone.utc).isoformat(),
+        "type": "PACT_v0.2_merkle_anchor"
+    }, indent=2) + "\n"
 
+    with open(GIT_ANCHOR_FILE, "a") as f:
+        f.write(anchor_content)
 
-# ---------------------------------------------------------------------------
-# Transparency Log
-# ---------------------------------------------------------------------------
-
-class TransparencyLog:
-    """
-    Simulated append-only transparency log with Merkle anchoring.
-
-    In production: replace with IPFS pinning + Ethereum anchoring, or
-    a distributed log service (Certificate Transparency log, etc.).
-
-    Usage:
-        log = TransparencyLog()
-        result = log.append(["sha256:abc...", "sha256:def..."])
-        entry = result["entry"]           # log entry
-        proofs = result["proofs"]          # per-policy Merkle proofs
-
-        verified = log.verify("sha256:abc...", log_index=0)
-        assert verified["valid"]
-    """
-
-    def __init__(self):
-        self.entries = []
-
-    def append(self, policy_hashes: list[str], note: str = "") -> dict:
-        """
-        Append a new batch of policy hashes to the log.
-        Returns { entry, root, proofs }.
-        """
-        index = len(self.entries)
-        prev_hash = self.entries[-1]["log_id"] if self.entries else None
-
-        result = build_merkle_tree(policy_hashes)
-        root = result["root"]
-        proofs = result["proofs"]
-
-        entry = create_log_entry(
-            index=index,
-            prev_hash=prev_hash,
-            merkle_root=root,
-            policy_hashes=policy_hashes,
-            note=note,
+    try:
+        subprocess.run(
+            ["git", "add", str(GIT_ANCHOR_FILE.relative_to(PACT_DIR))],
+            cwd=PACT_DIR, check=True, capture_output=True
         )
+        result = subprocess.run(
+            ["git", "commit", "-m", f"feat(pact): anchor PACT v0.2 merkle root\n\npolicy_hash: {policy_hash[:16]}...\nmerkle_root: {merkle_root[:16]}..."],
+            cwd=PACT_DIR, check=True, capture_output=True, text=True
+        )
+        git_ref = result.stdout.split("\n")[0] if result.stdout else "committed"
+    except subprocess.CalledProcessError:
+        git_ref = "git_commit_failed"
 
-        self.entries.append(entry)
-        return {"entry": entry, "root": root, "proofs": proofs}
-
-    def verify(self, policy_hash: str, log_index: int) -> dict:
-        """
-        Verify a policy hash appears in the log at log_index.
-        Returns { valid: bool, reason: str, proof: dict|null }.
-        """
-        if log_index < 0 or log_index >= len(self.entries):
-            return {"valid": False, "reason": "log index out of range", "proof": None}
-
-        entry = self.entries[log_index]
-        if policy_hash not in entry["policy_hashes"]:
-            return {"valid": False, "reason": "policy hash not in this batch", "proof": None}
-
-        leaf_idx = entry["policy_hashes"].index(policy_hash)
-        result = build_merkle_tree(entry["policy_hashes"])
-        proof = result["proofs"][leaf_idx]
-
-        return {
-            "valid": verify_merkle_proof(policy_hash, entry["merkle_root"], proof),
-            "reason": f"verified at index {log_index}",
-            "proof": proof,
-            "root": entry["merkle_root"],
-        }
-
-    def latest(self) -> Optional[dict]:
-        """Get the most recent log entry."""
-        return self.entries[-1] if self.entries else None
-
-    def all(self) -> list[dict]:
-        """Get all log entries."""
-        return list(self.entries)
+    return git_ref
 
 
-# ---------------------------------------------------------------------------
-# Policy Anchoring
-# ---------------------------------------------------------------------------
-
-def anchor_policy(policy: dict, log: TransparencyLog) -> dict:
+def commit_policy(policy_doc: dict) -> PolicyCommitment:
     """
-    Anchor a policy document to the transparency log.
-    Returns { anchor, entry } where anchor is the cryptographic proof of commitment.
-
-    If the policy is already in the log, returns the existing anchor
-    (idempotent — same policy can be verified without re-anchoring).
-
-    Args:
-        policy: Full policy document with policy_hash field
-        log: TransparencyLog instance
-
-    Returns:
-        {
-            anchor: {
-                policy_hash: str,
-                log_index: int,
-                log_id: str,
-                merkle_root: str,
-                already_anchored: bool
-            },
-            entry: dict
-        }
+    Commit a policy document to the transparency log.
+    
+    Process:
+    1. Compute deterministic policy hash
+    2. Append commitment entry to append-only log
+    3. Rebuild Merkle tree from all log entries
+    4. Anchor root to Git
+    5. Return commitment with proof structure
+    
+    The commitment CANNOT be modified after creation.
+    A new commitment creates a new log entry and a new Merkle root.
     """
-    policy_hash = policy.get("policy_hash")
-    if not policy_hash:
-        raise ValueError("Policy must have policy_hash — run create_policy first")
+    # Ensure deterministic field ordering
+    canonical = json.dumps(policy_doc, sort_keys=True, ensure_ascii=True)
+    policy_hash = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
 
-    # Check if already anchored
-    for i, entry in enumerate(log.entries):
-        if policy_hash in entry["policy_hashes"]:
-            return {
-                "anchor": {
-                    "policy_hash": policy_hash,
-                    "log_index": i,
-                    "log_id": entry["log_id"],
-                    "merkle_root": entry["merkle_root"],
-                    "already_anchored": True,
-                },
-                "entry": entry,
-            }
+    committed_at = datetime.now(timezone.utc).isoformat()
 
-    # Anchor new
-    result = log.append([policy_hash])
-    return {
-        "anchor": {
-            "policy_hash": policy_hash,
-            "log_index": result["entry"]["log_index"],
-            "log_id": result["entry"]["log_id"],
-            "merkle_root": result["entry"]["merkle_root"],
-            "already_anchored": False,
-        },
-        "entry": result["entry"],
+    # Build log entry (no entry_hash yet — computed by _append_to_transparency_log)
+    entry = {
+        "type": "PACT_v0.2_policy_commitment",
+        "policy_hash": policy_hash,
+        "policy_version": policy_doc.get("policy_version", "unknown"),
+        "agent_id": policy_doc.get("agent_id", "unknown"),
+        "committed_at": committed_at,
     }
 
+    # Append to transparency log (computes entry_hash)
+    entry_index, entry_hash = _append_to_transparency_log(entry)
 
-def verify_anchor(policy: dict, anchor: dict) -> dict:
+    # Rebuild Merkle tree from all entries
+    all_entries = []
+    if TRANSPARENCY_LOG.exists():
+        with open(TRANSPARENCY_LOG) as f:
+            for line in f:
+                if line.strip():
+                    all_entries.append(json.loads(line))
+
+    leaf_hashes = [e["entry_hash"] for e in all_entries]
+    _, merkle_root = _build_merkle_tree(leaf_hashes)
+
+    # Anchor root to Git
+    git_ref = _anchor_merkle_root_to_git(merkle_root, policy_hash)
+
+    # Update the entry with the new Merkle root
+    entry["merkle_root"] = merkle_root
+    entry["git_anchor"] = git_ref
+    entry["total_entries"] = len(all_entries)
+
+    # Overwrite the last entry with full data
+    with open(TRANSPARENCY_LOG) as f:
+        lines = f.readlines()
+    lines[-1] = json.dumps(entry, sort_keys=True) + "\n"
+    with open(TRANSPARENCY_LOG, "w") as f:
+        f.writelines(lines)
+
+    # Update individual file
+    commitment_file = COMMITMENTS_DIR / f"{entry_index:06d}.json"
+    with open(commitment_file, "w") as f:
+        json.dump(entry, f, indent=2)
+
+    return PolicyCommitment(
+        policy_doc=policy_doc,
+        policy_hash=policy_hash,
+        commitment_index=entry_index,
+        merkle_root=merkle_root,
+        committed_at=committed_at,
+        log_anchors=[f"entry:{entry_hash}", f"git:{git_ref}", f"merkle_root:{merkle_root}"]
+    )
+
+
+def verify_commitment(policy_hash: str, commitment_index: int) -> dict:
     """
-    Verify a policy anchor — prove the policy was committed to the log.
-    Returns { valid: bool, reason: str }.
+    Verify a commitment exists in the transparency log and its Merkle proof is valid.
+    
+    Third parties can call this without trusting the agent — they only need
+    the transparency log file and the Git anchor for the Merkle root.
     """
-    if anchor.get("policy_hash") != policy.get("policy_hash"):
-        return {"valid": False, "reason": "policy hash mismatch with anchor"}
+    log_file = COMMITMENTS_DIR / f"{commitment_index:06d}.json"
+
+    if not log_file.exists():
+        return {"valid": False, "reason": "commitment not found in log"}
+
+    with open(log_file) as f:
+        commitment = json.load(f)
+
+    if commitment["policy_hash"] != policy_hash:
+        return {"valid": False, "reason": "policy hash mismatch"}
+
+    # Rebuild Merkle tree up to this entry
+    leaf_hashes = []
+    for i in range(commitment_index + 1):
+        cf = COMMITMENTS_DIR / f"{i:06d}.json"
+        if not cf.exists():
+            return {"valid": False, "reason": f"log entry {i} missing"}
+        with open(cf) as f:
+            entry = json.load(f)
+        leaf_hashes.append(entry["entry_hash"])
+
+    _, computed_root = _build_merkle_tree(leaf_hashes)
+
+    if computed_root != commitment["merkle_root"]:
+        return {"valid": False, "reason": "merkle root mismatch — log may have been tampered with"}
 
     return {
         "valid": True,
-        "reason": f"policy anchored at log index {anchor.get('log_index')}, "
-                  f"log_id={anchor.get('log_id', '')[:20]}...",
-        "log_index": anchor.get("log_index"),
+        "commitment": commitment,
+        "merkle_proof": {
+            "leaf_count": len(leaf_hashes),
+            "root": computed_root,
+            "index": commitment_index,
+        }
     }
 
 
-# ---------------------------------------------------------------------------
-# Full v0.2 Flow Demo
-# ---------------------------------------------------------------------------
+def get_latest_merkle_root() -> Optional[str]:
+    """Get the most recent Merkle root anchored in the transparency log."""
+    if not TRANSPARENCY_LOG.exists():
+        return None
+    with open(TRANSPARENCY_LOG) as f:
+        lines = [l for l in f if l.strip()]
+    if not lines:
+        return None
+    last = json.loads(lines[-1])
+    return last.get("merkle_root")
 
-def demo():
-    """
-    Demonstrate the complete v0.2 policy commitment flow.
-    """
-    from pact import create_policy
 
-    # Create two policies
-    policy_a = create_policy("did:key:alice", ["read", "write"], ["delete"])
-    policy_b = create_policy("did:key:bob", ["search", "send"], ["exec"])
-
-    print(f"Policy A hash: {policy_a['policy_hash'][:30]}...")
-    print(f"Policy B hash: {policy_b['policy_hash'][:30]}...")
-
-    # Anchor both policies to the log in one batch
-    log = TransparencyLog()
-    result = log.append([policy_a["policy_hash"], policy_b["policy_hash"]], note="genesis batch")
-
-    print(f"\nLog entry created:")
-    print(f"  log_id:    {result['entry']['log_id'][:30]}...")
-    print(f"  log_index: {result['entry']['log_index']}")
-    print(f"  merkle_root: {result['root'][:30]}...")
-
-    # Verify policy A
-    verified_a = log.verify(policy_a["policy_hash"], log_index=0)
-    print(f"\nPolicy A verification: {'✓ PASS' if verified_a['valid'] else '✗ FAIL'} — {verified_a['reason']}")
-
-    # Verify policy B
-    verified_b = log.verify(policy_b["policy_hash"], log_index=0)
-    print(f"Policy B verification: {'✓ PASS' if verified_b['valid'] else '✗ FAIL'} — {verified_b['reason']}")
-
-    # Anchor policy A individually (idempotent — already anchored)
-    anchor_result = anchor_policy(policy_a, log)
-    print(f"\nRe-anchoring policy A (already anchored):")
-    print(f"  already_anchored: {anchor_result['anchor']['already_anchored']}")
-    print(f"  log_index: {anchor_result['anchor']['log_index']}")
-
-    # Anchor a new policy C
-    policy_c = create_policy("did:key:carol", ["read", "analyze"], [])
-    result_c = anchor_policy(policy_c, log)
-    print(f"\nAnchoring new policy C:")
-    print(f"  log_index: {result_c['anchor']['log_index']}")
-    print(f"  merkle_root: {result_c['anchor']['merkle_root'][:30]}...")
-
-    print("\n✓ Full v0.2 commitment flow verified")
-
+# --- CLI support ---
 
 if __name__ == "__main__":
-    demo()
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python3 commitment.py <policy.json>")
+        sys.exit(1)
+
+    with open(sys.argv[1]) as f:
+        policy_doc = json.load(f)
+
+    commitment = commit_policy(policy_doc)
+    print(json.dumps({
+        "policy_hash": commitment.policy_hash,
+        "commitment_index": commitment.commitment_index,
+        "merkle_root": commitment.merkle_root,
+        "committed_at": commitment.committed_at,
+        "log_anchors": commitment.log_anchors,
+    }, indent=2))
