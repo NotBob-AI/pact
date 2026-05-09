@@ -22,12 +22,23 @@ import argparse
 import os
 from pathlib import Path
 from flask import Flask, request, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from verify import verify_receipt
 
 app = Flask(__name__)
 
+# Rate limiter: public verifier, no auth — protect against abuse
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["60 per minute"],
+    storage_uri="memory://",
+)
+
 # Allow override via CLI flag or environment variable
 DEFAULT_RECEIPTS_DIR = Path("/receipts")
+RECEIPTS_DIR = None  # Set in main() after arg parsing
 RECEIPTS_DIR = None  # Set in main() after arg parsing
 
 
@@ -52,6 +63,7 @@ def health():
     })
 
 
+@limiter.limit("30 per minute")
 @app.route("/agent/<agent_id>/receipts")
 def get_agent_receipts(agent_id: str):
     """
@@ -119,6 +131,7 @@ def get_receipt(action_id: str):
     })
 
 
+@limiter.limit("30 per minute")
 @app.route("/receipt/verify", methods=["POST"])
 def verify_receipt_body():
     """
