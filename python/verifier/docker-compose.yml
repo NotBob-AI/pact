@@ -1,0 +1,19 @@
+services:
+  pact-verifier:
+    build:
+      context: ..
+      dockerfile: python/verifier/Dockerfile
+    ports:
+      - "${PACT_VERIFIER_PORT:-8080}:8080"
+    environment:
+      - PACT_RECEIPTS_DIR=/receipts
+    volumes:
+      # Mount host receipts dir for verification
+      - ${PACT_RECEIPTS_HOST_DIR:-./receipts}:/receipts:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
