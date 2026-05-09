@@ -37,8 +37,14 @@ def verify_zk_receipt(receipt: dict) -> dict:
     if not receipt_hash.startswith("sha256:"):
         return {"valid": False, "reason": "malformed receipt_hash"}
 
-    zk = receipt.get("proof", {}).get("zk", {})
-    proof_type = zk.get("proof_type")
+    # v0.3 ZK receipts: proof dict is embedded directly at receipt.proof
+    # (not nested under proof.zk — aligns with receipt_to_dict output)
+    raw_proof = receipt.get("proof", {})
+    if not raw_proof:
+        return {"valid": False, "reason": "missing proof field"}
+
+    # Handle both flat structure (receipt_to_dict) and nested zk sub-key
+    proof_type = raw_proof.get("proof_type") or raw_proof.get("zk", {}).get("proof_type")
 
     if not proof_type:
         return {"valid": False, "reason": "missing proof.zk.proof_type"}
@@ -114,7 +120,7 @@ def verify_receipt(receipt: dict) -> dict:
     """
     version = receipt.get("receipt_version", "0.1")
 
-    if version == "0.3":
+    if version in ("0.3", "0.3.0") or version.startswith("0.3."):
         return verify_zk_receipt(receipt)
     return verify_receipt_v01(receipt)
 
@@ -147,7 +153,7 @@ def main():
         print(f"  {status}  [{version}] action_id={receipt['action_id']}")
         print(f"             tool={receipt['tool_called']}  agent={receipt['agent_id']}")
         print(f"             policy_hash={receipt['policy_hash']}")
-        print(f"             statement: {receipt['proof']['statement']}")
+        print(f"             statement: {receipt.get('proof', {}).get('statement', receipt.get('statement', 'N/A'))}")
         print(f"             {result['reason']}\n")
 
         if not result["valid"]:
