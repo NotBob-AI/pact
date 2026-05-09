@@ -8,12 +8,15 @@ Only the receipt files and the public key embedded in each receipt.
 import json
 import hashlib
 import base64
+import os
+import argparse
 from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives import serialization
 from cryptography.exceptions import InvalidSignature
 
-RECEIPTS_DIR = Path("/receipts")
+# Allow override via environment variable for test flexibility
+DEFAULT_RECEIPTS_DIR = Path(os.environ.get("PACT_RECEIPTS_DIR", "/receipts"))
 
 
 # ─── v0.3 ZK receipt verification (lightweight structural check) ─────────────
@@ -117,14 +120,21 @@ def verify_receipt(receipt: dict) -> dict:
 
 
 def main():
-    receipt_files = sorted(RECEIPTS_DIR.glob("*.json"))
+    parser = argparse.ArgumentParser(description="PACT Receipt Verifier — CLI audit tool")
+    parser.add_argument(
+        "--receipts-dir", "-d", type=Path, default=DEFAULT_RECEIPTS_DIR,
+        help=f"Directory containing receipt JSON files (default: {DEFAULT_RECEIPTS_DIR})"
+    )
+    args = parser.parse_args()
+    receipt_files = sorted(args.receipts_dir.glob("*.json"))
 
     if not receipt_files:
-        print("[VERIFIER] No receipts found in /receipts")
+        print(f"[VERIFIER] No receipts found in {args.receipts_dir}")
         print("           Run the test-agent first: docker compose up")
         return
 
     print(f"\n[VERIFIER] Auditing {len(receipt_files)} receipt(s) as third party")
+    print(f"           Receipts dir: {args.receipts_dir}")
     print(f"           No access to agent runtime. Verifying math only.\n")
 
     all_valid = True
