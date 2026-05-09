@@ -159,26 +159,46 @@ PACT is not a silver bullet. It closes the **self-reporting gap** — the specif
 - [x] v0.2 ✅ — Policy anchoring to transparency log + Merkle batch commitment
 - [x] v0.3 ✅ — ZK receipt generator (Python host module + RISC Zero guest circuit, DUMMY_PROOF fallback)
 - [x] Layer 0 ✅ — MCP interceptor (WS + stdio interfaces, policy enforcement, receipt generation)
-- [ ] v0.4 — Verifier API + full MCP intercept layer production deployment
-  - [x] verifier.js — Receipt verification API (siglog + Rekor + local backends)
+- [x] v0.3 ✅ — ZK receipt generator (Python host module + RISC Zero guest circuit, DUMMY_PROOF fallback)
+- [x] v0.4 ✅ — Verifier REST API (Flask, rate-limited, Docker-packaged, offline bundle support)
+- [ ] v0.5 — FHE behavioral history layer (encrypted trace receipts via Zama Concrete)
 - [ ] v1.0 — Production-ready, audited
 
 ### Current Implementation
 
 ```
- python/policy.js       → v0.1: Policy creation + SHA-256 hash proof
- python/receipt.js      → v0.1: Receipt generation (sha256_membership)
- python/commitment.js   → v0.2: Policy anchoring to transparency log + Merkle batch
- python/zk-receipt.js  → v0.3: ZK receipt interface
- python/zk_host.py     → v0.3: RISC Zero host module (Python, bridges to Rust guest)
- rust/guest/main.rs    → v0.3: RISC Zero guest circuit (tool membership proof)
- src/interceptor.js     → Layer 0: MCP proxy layer (WS + stdio, policy enforcement)
+python/pact/            → Core library: receipt types, ZK host, policy versioning, OVID bridge
+python/verifier/        → Verifier REST API (Flask, rate-limited, Docker)
+                        → receipt_generator.py: generate sample v0.3 receipts for dev/test
+                        → fhe_receipt_demo.py: demo PACT v0.3+v0.5 composition
+                        → bundle.py: offline receipt bundle (create + verify)
+                        → verify.py: CLI audit tool
+rust/guest/            → RISC Zero guest circuit (tool membership ZK proof)
+src/                   → Layer 0: MCP proxy interceptor (WS + stdio)
 ```
 
 ### Quick Start
 
 ```bash
-# Test the full stack
+# Generate sample v0.3 receipts for development/testing
+cd python/verifier
+python3 receipt_generator.py --count 5 --output ./my-receipts
+
+# Verify the receipts
+python3 verify.py -d ./my-receipts
+
+# Demo FHE behavioral history layer (v0.3 ZK + v0.5 FHE composition)
+python3 fhe_receipt_demo.py --count 3 --output ./fhe-receipts
+python3 fhe_receipt_demo.py --verify --output ./fhe-receipts
+
+# Bundle receipts for offline verification
+python3 bundle.py create ./my-receipts -o pact-bundle.json
+python3 bundle.py verify pact-bundle.json
+
+# Run the verifier REST API (Docker)
+docker compose -f python/verifier/docker-compose.yml up
+
+# Test the MCP interceptor
 node test-local.js
 
 # Run the MCP interceptor (requires a committed policy.json)
