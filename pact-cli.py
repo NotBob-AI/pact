@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """
-PACT v0.3 — CLI Tool
+PACT v0.9 — CLI Tool
 
 Usage:
     pact-cli.py generate --policy policy.json --tool TOOL_NAME [--params params.json]
     pact-cli.py verify   --receipt receipt.json
     pact-cli.py status
     pact-cli.py diagnose
+    pact-cli.py bundle-create receipts_dir [--output bundle.json]
+    pact-cli.py bundle-verify bundle.json
+    pact-cli.py run [--agent-id NAME] [--output-dir DIR]
 
 Examples:
     pact-cli.py generate --policy my-policy.json --tool search_web
     pact-cli.py verify --receipt /tmp/pact-zk-proof.json
     pact-cli.py diagnose
+    pact-cli.py bundle-create ./receipts --output audit-bundle.json
+    pact-cli.py run --agent-id notbob --output-dir /tmp/pact-demo
 """
 
 import argparse
@@ -28,6 +33,11 @@ from pact.zk_host import (
     _check_risc0_environment,
     DUMMY_PROOF,
 )
+from pact.receipt_generator import ReceiptGenerator
+from pact.policy_spec import PolicySpec
+from pact.commitment import TransparencyLog
+from verifier.bundle import build_bundle, verify_bundle
+from verifier.verify import verify_zk_receipt as vr
 
 
 def cmd_generate(args):
@@ -133,6 +143,113 @@ def cmd_diagnose(args):
     return 0
 
 
+def cmd_bundle_create(args):
+    """Create an offline-verifiable receipt bundle."""
+    receipts_dir = Path(args.receipts_dir)
+    if not receipts_dir.exists():
+        print(f"[error] Directory not found: {receipts_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Building bundle from {receipts_dir}...")
+    bundle = build_bundle(receipts_dir)
+
+    output_path = Path(args.output) if args.output else receipts_dir / "bundle.json"
+    with open(output_path, "w") as f:
+        json.dump(bundle, f, indent=2)
+
+    print(f"Bundle written to {output_path}")
+    print(f"  agent_id:  {bundle['agent_id']}")
+    print(f"  receipts:  {len(bundle['receipts'])}")
+    print(f"  first:     {bundle['chain_integrity']['first_receipt_hash'][:24]}...")
+    print(f"  last:      {bundle['chain_integrity']['last_receipt_hash'][:24]}...")
+    return 0
+
+
+def cmd_bundle_verify(args):
+    """Verify an offline receipt bundle."""
+    with open(args.bundle) as f:
+        bundle = json.load(f)
+
+    result = verify_bundle(bundle)
+    print(f"Bundle Verification: {'✓ VALID' if result['valid'] else '✗ INVALID'}")
+    print(f"  agent_id:  {result.get('agent_id')}")
+    print(f"  policy:    {result.get('policy_hash', 'N/A')[:24]}...")
+    print(f"  receipts:  {len(result.get('results', []))}")
+
+    invalid = [r for r in result.get('results', []) if not r.get('verification', {}).get('valid')]
+    if invalid:
+        print(f"\n  ✗ {len(invalid)} invalid receipt(s):")
+        for r in invalid:
+            print(f"    - {r.get('action_id', '?')[:16]}... ({r.get('tool')})")
+
+    chain_breaks = [r for r in result.get('results', []) if r.get('chain_breaking')]
+    if chain_breaks:
+        print(f"\n  ✗ {len(chain_breaks)} chain-breaking receipt(s):")
+        for r in chain_breaks:
+            print(f"    - {r.get('action_id', '?')[:16]}...")
+
+    return 0 if result['valid'] else 1
+
+
+def cmd_run_receipts(args):
+    """Run the full integration test and generate a demo bundle."""
+    receipts_dir = Path(args.output_dir)
+    receipts_dir.mkdir(parents=True, exist_ok=True)
+
+    print("=== PACT Integration Test + Bundle Demo ===\n")
+
+    log = TransparencyLog()
+    gen = ReceiptGenerator(
+        agent_id=args.agent_id or "notbob",
+        principal_did="did:web:notbob.ai",
+    )
+    print(f"Generator: agent_id={gen.agent_id}")
+
+    spec = gen.register_policy(
+        allowed_tools=["web_search", "web_fetch", "memory_search", "exec"],
+        denied_tools=["delete", "rm", "system", "sudo"],
+        constraints={"max_calls_per_hour": 100},
+    )
+    print(f"Policy registered: {spec.compute_hash()[:24]}...")
+
+    anchor = gen.anchor_policy(spec)
+    print(f"Policy anchored: log_index={anchor['log_index']}")
+
+    # Generate receipts
+    receipts_generated = []
+    tools_to_test = [
+        ("web_search", {"query": "critical minerals 2026"}),
+        ("memory_search", {"query": "PACT accountability"}),
+        ("delete", {"path": "/etc/passwd"}),  # denied
+        ("web_fetch", {"url": "https://notbob.ai"}),
+    ]
+
+    for tool_name, params in tools_to_test:
+        receipt, outcome = gen.generate_receipt(tool_name, params)
+        out_marker = "✓" if outcome == "permitted" else "✗"
+        print(f"  {out_marker} {tool_name}: {outcome}")
+
+        # Save receipt
+        receipt_path = receipts_dir / f"{receipt.tool_call.action_id}.json"
+        with open(receipt_path, "w") as f:
+            json.dump(receipt.to_dict(), f, indent=2)
+        receipts_generated.append(receipt_path)
+
+    print(f"\n{len(receipts_generated)} receipts written to {receipts_dir}")
+
+    # Build bundle
+    bundle = build_bundle(receipts_dir)
+    bundle_path = receipts_dir / "bundle.json"
+    with open(bundle_path, "w") as f:
+        json.dump(bundle, f, indent=2)
+    print(f"Bundle written to {bundle_path}")
+
+    # Verify
+    result = verify_bundle(bundle)
+    print(f"\nBundle verification: {'✓ VALID' if result['valid'] else '✗ INVALID'}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(prog="pact-cli.py", description="PACT v0.3 CLI")
     sub = parser.add_subparsers(dest="cmd")
@@ -150,6 +267,17 @@ def main():
     ver = sub.add_parser("verify", help="Verify a ZK receipt")
     ver.add_argument("--receipt", required=True, help="Path to receipt JSON")
 
+    bcreate = sub.add_parser("bundle-create", help="Create an offline receipt bundle")
+    bcreate.add_argument("receipts_dir", help="Directory containing receipt .json files")
+    bcreate.add_argument("--output", "-o", help="Output bundle path (default: receipts_dir/bundle.json)")
+
+    bverify = sub.add_parser("bundle-verify", help="Verify an offline receipt bundle")
+    bverify.add_argument("bundle", help="Path to bundle .json file")
+
+    run = sub.add_parser("run", help="Run full integration test + generate demo bundle")
+    run.add_argument("--agent-id", help="Agent ID (default: notbob)")
+    run.add_argument("--output-dir", default="/tmp/pact-demo-receipts", help="Receipts output dir")
+
     args = parser.parse_args()
 
     if not args.cmd:
@@ -161,6 +289,9 @@ def main():
         "verify": cmd_verify,
         "status": cmd_status,
         "diagnose": cmd_diagnose,
+        "bundle-create": cmd_bundle_create,
+        "bundle-verify": cmd_bundle_verify,
+        "run": cmd_run_receipts,
     }
 
     return commands[args.cmd](args)
