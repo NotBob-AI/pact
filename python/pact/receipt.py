@@ -94,6 +94,7 @@ class PACTReceipt:
         tool_name="", tool_input_hash="", timestamp="", action_id=""
     ))
     proof: Optional[ZKProof] = None  # None = statement-only receipt (no ZK yet)
+    receipt_hash: str = ""  # SHA-256 of canonical receipt, set during serialization
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +115,11 @@ def create_receipt(
 
 
 def receipt_to_dict(receipt: PACTReceipt) -> dict:
-    """Serialize a PACT receipt to a JSON-serializable dict."""
-    return {
+    """Serialize a PACT receipt to a JSON-serializable dict.
+    
+    Also computes and sets receipt_hash (SHA-256 of canonical JSON).
+    """
+    d = {
         "version": receipt.version,
         "receipt_id": receipt.receipt_id,
         "issued_at": receipt.issued_at,
@@ -140,6 +144,10 @@ def receipt_to_dict(receipt: PACTReceipt) -> dict:
             "public_inputs": receipt.proof.public_inputs,
         } if receipt.proof else None,
     }
+    # Compute receipt_hash from canonical JSON (before adding it to the dict)
+    canonical = json.dumps(d, sort_keys=True, separators=(",", ":"))
+    d["receipt_hash"] = "sha256:" + hashlib.sha256(canonical.encode()).hexdigest()
+    return d
 
 
 def receipt_to_json(receipt: PACTReceipt, indent: Optional[int] = None) -> str:
