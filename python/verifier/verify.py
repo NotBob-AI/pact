@@ -111,9 +111,9 @@ def verify_receipt(receipt: dict) -> dict:
     v0.1: Ed25519 signed commitment (cryptographic — full verification)
     v0.3: ZK membership proof (structural check only — ZK runtime not available in audit context)
     """
-    version = receipt.get("receipt_version", "0.1")
+    version = receipt.get("receipt_version", receipt.get("version", "0.1"))
 
-    if version == "0.3":
+    if version.startswith("0.3"):
         return verify_zk_receipt(receipt)
     return verify_receipt_v01(receipt)
 
