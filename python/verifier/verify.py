@@ -34,7 +34,9 @@ def verify_zk_receipt(receipt: dict) -> dict:
     if not receipt_hash.startswith("sha256:"):
         return {"valid": False, "reason": "malformed receipt_hash"}
 
-    zk = receipt.get("proof", {}).get("zk", {})
+    # proof is stored flat (proof.proof_type) — not nested under proof.zk
+    proof_obj = receipt.get("proof", {})
+    zk = proof_obj.get("zk", proof_obj)  # fall back to flat if no "zk" subkey
     proof_type = zk.get("proof_type")
 
     if not proof_type:

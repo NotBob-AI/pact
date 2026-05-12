@@ -189,7 +189,7 @@ class ReceiptGenerator:
         # Build ZKProof (DUMMY for v0.7 — real proof wired in v0.3)
         tool_name_hash = "sha256:" + hashlib.sha256(tool_name.encode()).hexdigest()
         zk_proof = ZKProof(
-            proof_type="dummy",
+            proof_type="DUMMY_ZK_PROOF",
             image_id="pact-v0.7-dummy",
             seal="DUMMY_PROOF",
             public_inputs={
