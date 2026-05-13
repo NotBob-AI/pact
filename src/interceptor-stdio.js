@@ -28,6 +28,7 @@ import { createInterface } from 'readline';
 import { checkToolCall } from './policy.js';
 import { generateReceipt } from './receipt.js';
 import { generateZkReceipt } from './zk-receipt.js';
+import { ZkProver } from './zk_prover.js';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -82,6 +83,14 @@ export class StdioInterceptor {
    * NOTE: The calling process IS the interceptor. This starts the real MCP server
    * as a child and routes agent traffic through this process.
    */
+  /**
+   * Start the interceptor — spawn the real MCP server and wire up stdio interception.
+   * Returns the child process. Agent should write to this process's stdin;
+   * agent should read from this process's stdout.
+   *
+   * NOTE: The calling process IS the interceptor. This starts the real MCP server
+   * as a child and routes agent traffic through this process.
+   */
   start() {
     if (!this.command) {
       throw new Error('StdioInterceptor requires a command to spawn the real MCP server');
@@ -96,6 +105,11 @@ export class StdioInterceptor {
     });
 
     this.running = true;
+
+    // Initialize ZK prover if ZK receipts enabled
+    if (this.useZkReceipts) {
+      this._zkProver = new ZkProver({ useDummyProof: true });
+    }
 
     // Wire agent stdin → interceptor → child stdin
     const agentRl = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -221,15 +235,17 @@ export class StdioInterceptor {
 
     // Generate receipt for permitted call
     let receipt;
-    if (this.useZkReceipts) {
+    if (this.useZkReceipts && this._zkProver) {
       try {
-        const { zk_receipt } = await generateZkReceipt({
+        const { zk_receipt } = await this._zkProver.prove({
           policy: this.policy,
           toolName: primaryTool,
           anchor: this.anchor,
+          merkleProof: [],  // TODO: fetch from transparency log
           params: toolCalls[0]?.arguments || {},
         });
         receipt = zk_receipt;
+        console.error(`[PACT Stdio] ZK receipt generated: ${receipt.receipt_id}`);
       } catch (e) {
         console.error(`[PACT Stdio] ZK receipt generation failed: ${e.message} — falling back to v0.1`);
         const { receipt: v01 } = generateReceipt({
