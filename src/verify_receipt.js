@@ -46,7 +46,7 @@ export async function verifyPactReceipt({ receipt, policyHash, toolName = null, 
   // ── Required field check ────────────────────────────────────────────────────
   const requiredPublic = ['policy_hash', 'merkle_root', 'log_index', 'tool_name_hash'];
   for (const field of requiredPublic) {
-    if (!receipt.public?.[field]) {
+    if (receipt.public?.[field] == null) {
       return {
         valid: false,
         reason: `missing required public field: ${field}`,
