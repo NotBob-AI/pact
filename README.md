@@ -157,8 +157,8 @@ PACT is not a silver bullet. It closes the **self-reporting gap** — the specif
 **Roadmap:**
 - [x] v0.1 ✅ — Policy commitment + SHA-256 receipt format
 - [x] v0.2 ✅ — Policy anchoring to transparency log + Merkle batch commitment
-- [x] v0.3 ✅ — ZK receipt generator (Python host module + RISC Zero guest circuit, DUMMY_PROOF fallback)
-- [x] Layer 0 ✅ — MCP interceptor (WS + stdio interfaces, policy enforcement, receipt generation)
+- [x] v0.3 ✅ — ZK receipt generator (ZkHost real prover bridge + verify_receipt.js + Rust guest)
+- [x] Layer 0 ✅ — MCP stdio interceptor with live Merkle proof fetch from siglog
 - [ ] v0.4 — Verifier API + full MCP intercept layer production deployment
   - [x] verifier.js — Receipt verification API (siglog + Rekor + local backends)
 - [ ] v1.0 — Production-ready, audited
@@ -166,13 +166,16 @@ PACT is not a silver bullet. It closes the **self-reporting gap** — the specif
 ### Current Implementation
 
 ```
- python/policy.js       → v0.1: Policy creation + SHA-256 hash proof
- python/receipt.js      → v0.1: Receipt generation (sha256_membership)
- python/commitment.js   → v0.2: Policy anchoring to transparency log + Merkle batch
- python/zk-receipt.js  → v0.3: ZK receipt interface
- python/zk_host.py     → v0.3: RISC Zero host module (Python, bridges to Rust guest)
+ src/policy.js          → v0.1: Policy creation + SHA-256 hash proof
+ src/receipt.js         → v0.1: Receipt generation (sha256_membership)
+ src/commitment.js      → v0.2: Policy anchoring to transparency log + Merkle batch
+ src/zk-receipt.js     → v0.3: ZK receipt interface
+ src/zk_prover.js      → v0.3: RISC Zero prover bridge (Node.js → Rust guest ELF)
+ src/zk_host.js        → v0.3: Production ZkHost — real RISC Zero prover, replaces DUMMY path
+ src/verify_receipt.js → v0.3: Receipt verifier (zk_membership + DUMMY_PROOF)
+ src/log_client.js     → Layer 0: siglog transparency log client (Merkle proof fetch)
+ src/interceptor-stdio.js → Layer 0: MCP stdio interceptor with live Merkle proof fetch
  rust/guest/main.rs    → v0.3: RISC Zero guest circuit (tool membership proof)
- src/interceptor.js     → Layer 0: MCP proxy layer (WS + stdio, policy enforcement)
 ```
 
 ### Quick Start
