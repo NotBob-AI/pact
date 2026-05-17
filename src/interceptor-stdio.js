@@ -29,6 +29,7 @@ import { checkToolCall } from './policy.js';
 import { generateReceipt } from './receipt.js';
 import { generateZkReceipt } from './zk-receipt.js';
 import { ZkProver } from './zk_prover.js';
+import { getLogEntry } from './log_client.js';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -53,15 +54,17 @@ export class StdioInterceptor {
    * @param {string[]} [config.command] - Command to spawn real MCP server e.g. ['npx', '-y', '@modelcontextprotocol/server-filesystem', '/tmp']
    * @param {string[]} [config.args] - Arguments for the command
    * @param {boolean} [config.useZkReceipts=false] - Use ZK receipts (requires RISC Zero)
+   * @param {string} [config.logUrl] - siglog transparency log URL (for Merkle proof fetching)
    * @param {boolean} [config.blockUnauthorized=true] - Block tool calls not in policy
    * @param {function} [config.onReceipt] - Callback(receipt) for each generated receipt
    */
-  constructor({ policy, anchor, command, args = [], useZkReceipts = false, blockUnauthorized = true, onReceipt = null }) {
+  constructor({ policy, anchor, command, args = [], useZkReceipts = false, logUrl = null, blockUnauthorized = true, onReceipt = null }) {
     this.policy = policy;
     this.anchor = anchor;
     this.command = command;
     this.args = args;
     this.useZkReceipts = useZkReceipts;
+    this.logUrl = logUrl || anchor.log_url || null;
     this.blockUnauthorized = blockUnauthorized;
     this.onReceipt = onReceipt || (() => {});
 
@@ -237,11 +240,22 @@ export class StdioInterceptor {
     let receipt;
     if (this.useZkReceipts && this._zkProver) {
       try {
+        // Fetch Merkle inclusion proof from transparency log before generating ZK receipt
+        let merkleProof = [];
+        if (this.logUrl && this.anchor.log_id) {
+          try {
+            const { proof } = await getLogEntry(this.logUrl, this.anchor.log_id);
+            merkleProof = proof?.siblings ? proof : [];
+            console.error(`[PACT Stdio] Merkle proof fetched: ${merkleProof.length} siblings`);
+          } catch (e) {
+            console.error(`[PACT Stdio] Merkle proof fetch failed: ${e.message} — continuing without proof`);
+          }
+        }
         const { zk_receipt } = await this._zkProver.prove({
           policy: this.policy,
           toolName: primaryTool,
           anchor: this.anchor,
-          merkleProof: [],  // TODO: fetch from transparency log
+          merkleProof,
           params: toolCalls[0]?.arguments || {},
         });
         receipt = zk_receipt;
@@ -333,6 +347,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (args[i] === '--args') { parsed.args = args[++i].split(','); continue; }
     if (args[i] === '--zk') { parsed.useZkReceipts = true; continue; }
     if (args[i] === '--allow-unaudited') { parsed.blockUnauthorized = false; continue; }
+    if (args[i] === '--log-url') { parsed.logUrl = args[++i]; continue; }
     i++;
   }
 
@@ -350,6 +365,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     anchor: parsed.anchor,
     command: fullCommand,
     useZkReceipts: parsed.useZkReceipts,
+    logUrl: parsed.logUrl || null,
     blockUnauthorized: parsed.blockUnauthorized !== false,
   });
 
