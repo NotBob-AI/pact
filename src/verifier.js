@@ -239,6 +239,27 @@ async function verifyLocalAnchor(anchor, expectedPolicyHash) {
 // Alias for API consumers
 export { verifyReceipt as verifyPactReceipt };
 
+// Standalone CLI for quick verification testing
+// Usage: node verifier.js <receipt.json> <policy-hash> [--log siglog|rekor] [--url <log-api-url>]
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const fs = await import('fs');
+  const args = process.argv.slice(2);
+  if (args.length < 1) {
+    console.error('Usage: node verifier.js <receipt.json> [--policy-hash <hash>] [--log siglog|rekor] [--url <url>]');
+    process.exit(1);
+  }
+  const receipt = JSON.parse(fs.readFileSync(args[0], 'utf8'));
+  const opts = {};
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === '--policy-hash' && args[i+1]) opts.policyHash = args[++i];
+    else if (args[i] === '--log' && args[i+1]) opts.logVerifier = args[++i];
+    else if (args[i] === '--url' && args[i+1]) opts.logApiUrl = args[++i];
+  }
+  const result = await verifyReceipt(receipt, opts);
+  console.log(JSON.stringify(result, null, 2));
+}
+
+
 // Verification result type (for TypeScript-like docs)
 /**
  * @typedef {Object} VerificationResult
