@@ -15,7 +15,7 @@
 
 import { createPolicy } from './src/policy.js';
 import { generateReceipt } from './src/receipt.js';
-import { TransparencyLog, buildMerkleTree } from './src/commitment.js';
+import { TransparencyLog, buildMerkleTree, anchorPolicy } from './src/commitment.js';
 import { verifyPactReceipt, batchVerifyReceipts } from './src/verify_receipt.js';
 import crypto from 'crypto';
 
@@ -60,7 +60,7 @@ async function runTests() {
   });
 
   test('policy has allowed_tools list', () => {
-    assert(Array.isArray(policy.allowed_tools) && policy.allowed_tools.length > 0, 'allowed_tools must be non-empty array');
+    assert(Array.isArray(policy.policy?.allowed_tools) && policy.policy.allowed_tools.length > 0, 'allowed_tools must be non-empty array');
   });
 
   // ── 2. Transparency Log + Merkle Anchor ─────────────────────────────────────
@@ -77,8 +77,9 @@ async function runTests() {
 
   test('idempotent re-anchor of same policy', () => {
     const countBefore = log.entries.length;
-    const { entry: entry2 } = log.append([policy.policy_hash], 're-anchor same policy');
+    const { anchor } = anchorPolicy(policy, log);
     assert(log.entries.length === countBefore, 're-anchoring same policy should not add new entry (idempotent)');
+    assert(anchor.already_anchored === true, 'anchor should indicate already_anchored');
   });
 
   test('anchor can be used as PACT anchor', () => {
