@@ -26,6 +26,16 @@ from verify import verify_receipt
 
 app = Flask(__name__)
 
+# Global error handler — ensures any exception returns JSON, never crashes the server
+@app.errorhandler(Exception)
+def handle_exception(e):
+    app.logger.exception("Unhandled exception: %s", e)
+    return jsonify({
+        "error": "internal_server_error",
+        "message": str(e),
+        "type": type(e).__name__,
+    }), 500
+
 # Allow override via CLI flag or environment variable
 DEFAULT_RECEIPTS_DIR = Path("/receipts")
 RECEIPTS_DIR = None  # Set in main() after arg parsing
@@ -71,6 +81,7 @@ def get_agent_receipts(agent_id: str):
         }), 500
 
     receipts = []
+    errors = []
     for receipt_file in receipts_dir.glob("*.json"):
         try:
             receipt = json.loads(receipt_file.read_text())
@@ -88,6 +99,9 @@ def get_agent_receipts(agent_id: str):
             })
         except (json.JSONDecodeError, IOError):
             continue
+        except Exception as e:
+            errors.append({"file": receipt_file.name, "error": str(e)})
+            continue
 
     receipts.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
     return jsonify({
@@ -95,6 +109,7 @@ def get_agent_receipts(agent_id: str):
         "count": len(receipts),
         "receipts": receipts,
         "receipts_dir": str(receipts_dir),
+        "scan_errors": errors,
     })
 
 
