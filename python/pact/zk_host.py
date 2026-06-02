@@ -190,24 +190,46 @@ def _call_risc0_prover(public_inputs: dict, private_witness: dict) -> dict:
     Call the RISC Zero prover with the given inputs.
     Requires: RISC Zero toolchain + compiled guest program.
 
+    Expected workflow:
+        1. Build guest image: cd rust/guest && cargo build --release
+        2. Compute image ID: cargo risczero imageid --manifest-dir rust/guest
+        3. Run prover: cargo risczero prove --manifest-dir rust/guest \\
+            --input /tmp/pact-prover-input.json \\
+            --output /tmp/pact-zk-proof.json
+        4. Parse receipt from output path
+
+    The prover reads two JSON objects from stdin:
+        - Line 1: Public inputs (JSON object)
+        - Line 2: Private witness (JSON object)
+
     Returns: RISC Zero receipt dict (matches stub_receipt format).
     """
     if DUMMY_PROOF:
         raise RuntimeError("RISC Zero not available and DUMMY_PROOF=1 — should not reach here")
 
-    # Build input JSON for the prover
     prover_input = {
         "public": public_inputs,
         "private": private_witness,
     }
 
-    # Write input to temp file (RISC Zero prover reads from stdin or file)
+    # Write input to temp file (risc0 prove reads from file via --input)
     input_path = Path("/tmp/pact-prover-input.json")
-    with open(input_path, "w") as f:
-        json.dump(prover_input, f, indent=2)
+    input_path.write_text(json.dumps(prover_input, indent=2))
 
-    # Build the prover command
     guest_dir = RISC0_GUEST_DIR
+
+    # Step 1: Build guest if not already built
+    build_result = subprocess.run(
+        ["cargo", "build", "--release", "--manifest-path", str(guest_dir / "Cargo.toml")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if build_result.returncode != 0:
+        raise RuntimeError(f"RISC Zero guest build failed:\n{build_result.stderr}")
+
+    # Step 2: Run prover — stdin receives JSON, output goes to --output file
+    # The RISC Zero CLI (rz) or cargo risczero prove runs the guest + generates receipt
     prover_cmd = [
         "cargo", "risczero", "prove",
         "--manifest-dir", str(guest_dir),
@@ -215,28 +237,21 @@ def _call_risc0_prover(public_inputs: dict, private_witness: dict) -> dict:
         "--output", str(PROOF_OUTPUT_PATH),
     ]
 
-    # Try the risc0 CLI first; if that fails, try cargo-risczero directly
-    try:
-        result = subprocess.run(
-            prover_cmd,
-            cwd=str(guest_dir),
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min timeout for prover
-        )
-    except FileNotFoundError:
-        # Fall back to cargo-risczero
-        result = subprocess.run(
-            ["cargo", "risczero", "prove"],
-            input=json.dumps(prover_input),
-            cwd=str(guest_dir),
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+    result = subprocess.run(
+        prover_cmd,
+        capture_output=True,
+        text=True,
+        timeout=600,  # 10 min timeout for ZK proof generation
+    )
 
     if result.returncode != 0:
-        raise RuntimeError(f"RISC Zero prover failed: {result.stderr}")
+        raise RuntimeError(f"RISC Zero prover failed:\nstdout: {result.stdout}\nstderr: {result.stderr}")
+
+    if not PROOF_OUTPUT_PATH.exists():
+        raise RuntimeError(
+            f"RISC Zero prover ran but output file not found at {PROOF_OUTPUT_PATH}. "
+            f"Check stdout: {result.stdout}"
+        )
 
     with open(PROOF_OUTPUT_PATH) as f:
         return json.load(f)
