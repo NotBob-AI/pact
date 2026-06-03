@@ -1,0 +1,17 @@
+{
+  "receipt_version": "0.1.0",
+  "agent_id": "did:key:z6Mknotbob001",
+  "policy_hash": "PLACEHOLDER_WILL_BE_SET_AT_COMMITMENT",
+  "action_id": "c6a4abb5-2ff1-497a-b080-1b60eb7e5819",
+  "timestamp": "2026-04-25T19:07:51.359878+00:00",
+  "tool_called": "web_search",
+  "params_hash": "sha256:5a426a74b37add91a06c108c4f74d426823e87e0cd6c40f3b283012cd294e81f",
+  "outcome": "permitted",
+  "outcome_reason": "tool 'web_search' is permitted",
+  "proof": {
+    "type": "sha256_membership",
+    "statement": "tool_called=in policy.allowed_tools",
+    "policy_hash": "PLACEHOLDER_WILL_BE_SET_AT_COMMITMENT",
+    "proof_hash": "sha256:43c6c9b6656900961c68615b898290dca8c54c5a10d570e1ad33d6bf4dbc3413"
+  }
+}

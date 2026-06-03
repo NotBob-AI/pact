@@ -1,17 +1,35 @@
 {
-  "receipt_version": "0.1.0",
+  "receipt_version": "0.3.0",
+  "receipt_hash": "sha256:4f63462b8bf147a2ae072a3373d89e067742a9c0b6915d4dec8c2d03aebc1cce",
   "agent_id": "did:key:z6Mknotbob001",
-  "policy_hash": "PLACEHOLDER_WILL_BE_SET_AT_COMMITMENT",
+  "policy_hash": "sha256:3c15b550b001a844097d486b2767d28a76285ea9bf9a81fa49235f3580c825b2",
   "action_id": "c6a4abb5-2ff1-497a-b080-1b60eb7e5819",
   "timestamp": "2026-04-25T19:07:51.359878+00:00",
   "tool_called": "web_search",
   "params_hash": "sha256:5a426a74b37add91a06c108c4f74d426823e87e0cd6c40f3b283012cd294e81f",
   "outcome": "permitted",
   "outcome_reason": "tool 'web_search' is permitted",
+  "anchor": {
+    "method": "local",
+    "log_index": 2,
+    "log_id": "entry-c6a4abb5-2ff1-497a-b080-1b60eb7e5819",
+    "merkle_root": "sha256:a2b08e08ad52c36599da62df6257952831f6a94801fb6e04e046c25bb5809f80",
+    "upgraded": true,
+    "upgraded_from": "0.1.0",
+    "upgraded_at": "2026-05-28T21:05:42.958137+00:00"
+  },
   "proof": {
-    "type": "sha256_membership",
-    "statement": "tool_called=in policy.allowed_tools",
-    "policy_hash": "PLACEHOLDER_WILL_BE_SET_AT_COMMITMENT",
-    "proof_hash": "sha256:43c6c9b6656900961c68615b898290dca8c54c5a10d570e1ad33d6bf4dbc3413"
-  }
+    "type": "zk_membership_proof",
+    "standard": "urn:pact:receipt:v0.3",
+    "zk": {
+      "proof_type": "DUMMY_ZK_PROOF",
+      "mode": "DUMMY \u2014 set RISC0_TOOLCHAIN=1 for real proofs",
+      "public_inputs_hash": "b7371f5be5042d623d287edc436ef4c1aa38463c4ab598e013e61494c5aa2532",
+      "verified": true,
+      "note": "Upgraded from v0.1 SHA-256 receipt by upgrade_receipts.py"
+    },
+    "statement": "tool_called \u2208 committed_policy AND policy_hash anchored at log_index=2"
+  },
+  "upgraded_by": "upgrade_receipts.py v0.3",
+  "interceptor": "pact-mcp-interceptor v0.3-upgraded"
 }
