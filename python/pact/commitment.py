@@ -88,23 +88,43 @@ def build_merkle_tree(leaves: list[str]) -> dict:
         node_idx = idx
         # Walk from leaves level (tree[0]) upward toward root (tree[-1])
         for t in range(1, num_levels):
-            # sibling is 1 - node_idx % 2: left child (idx 0) has right sibling (idx 1), right child has left sibling (idx 0)
-            sibling_idx = 1 - (node_idx % 2)
-            sibling = tree[t][sibling_idx]
+            # At level t, node lives in tree[t-1] at position node_idx.
+            # Its sibling is also in tree[t-1] at position sibling_idx = node_idx ^ 1.
+            # sibling_idx is clamped to tree[t-1] size (handles padded leaves correctly).
+            parent_idx = node_idx // 2
+            sibling_idx = node_idx ^ 1
+            current_level_size = len(tree[t - 1])
+            if sibling_idx >= current_level_size:
+                sibling_idx = node_idx  # use self (padded leaf)
+            sibling = tree[t - 1][sibling_idx]
             proof.append({
                 "hash": sibling,
                 "side": "right" if node_idx % 2 == 0 else "left"
             })
-            node_idx = node_idx // 2
+            node_idx = parent_idx
         proofs.append({"leaf": leaf, "path": proof})
 
     return {"root": root, "proofs": proofs}
 
 def verify_merkle_proof(leaf: str, root: str, proof: dict) -> bool:
-    """Verify a Merkle inclusion proof."""
-    node = leaf
+    """
+    Verify a Merkle inclusion proof.
+    
+    tree[0] stores _hash_pair(leaf, leaf) — the hash-doubled leaf.
+    So verification starts from _hash_pair(leaf, leaf), not the raw leaf.
+    
+    The 'side' field tells us whether our node was left or right child:
+    - 'right': our node is left child → pair as (node, sibling)
+    - 'left': our node is right child → pair as (sibling, node)
+    """
+    node = _hash_pair(leaf, leaf)  # tree[0] stores H(leaf), not raw leaf
     for step in proof["path"]:
-        node = _hash_pair(node, step["hash"])
+        if step["side"] == "right":
+            # Our node was the left child; sibling is to our right
+            node = _hash_pair(node, step["hash"])
+        else:
+            # Our node was the right child; sibling is to our left
+            node = _hash_pair(step["hash"], node)
     return node == root
 
 
