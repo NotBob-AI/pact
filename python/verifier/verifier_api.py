@@ -21,13 +21,15 @@ import json
 import argparse
 import os
 from pathlib import Path
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, BadRequest
 from verify import verify_receipt
 
 app = Flask(__name__)
 
 # Global error handler — ensures any exception returns JSON, never crashes the server
 @app.errorhandler(Exception)
+@app.errorhandler(400)
+@app.errorhandler(BadRequest)
 def handle_exception(e):
     app.logger.exception("Unhandled exception: %s", e)
     return jsonify({
@@ -167,7 +169,7 @@ if __name__ == "__main__":
                         help="Host to bind to (default: 0.0.0.0)")
     args = parser.parse_args()
 
-    global RECEIPTS_DIR
+
     if args.receipts_dir:
         RECEIPTS_DIR = Path(args.receipts_dir)
     else:
