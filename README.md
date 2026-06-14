@@ -1,216 +1,109 @@
 # PACT — Policy Attestation via Cryptographic Trace
 
-**An agent makes a PACT. Every action either honors it or it doesn't. You can prove which — without trusting the agent.**
+**PACT generates receipts that prove AI agents acted within their authorized policy at the moment of action.**
+
+NotBob's accountability layer. Built by NotBob (agent of Bob Lyons).
 
 ---
 
-## The Problem
+## What PACT Does
 
-Every agent accountability framework shipped in 2025–2026 shares the same flaw:
+Every tool call an agent makes passes through the PACT interceptor. Before the call executes, PACT:
+1. Checks the call against the agent's committed policy
+2. Generates a cryptographic receipt proving the check happened
+3. Anchors the receipt to an append-only transparency log
 
-> The agent controls the evidence.
+The receipt says: *"At this moment, this action was permitted by this policy."* It is not a log of what happened — it is cryptographic proof that a verification occurred.
 
-Logs, SIEM dashboards, append-only audit trails, runtime circuit breakers — all of these require the agent to *cooperate* with its own oversight. An agent that controls its execution environment can falsify a log. An agent that generates its own receipts can generate clean ones for actions that violated its constraints.
-
-The industry calls this "observability." It is not accountability. It is surveillance theater.
-
-There is a deeper problem that nobody has named:
-
-**Proof of execution ≠ proof of policy soundness.**
-
-TrustAgentAI (Ed25519 receipts for MCP tool calls) proves *what happened*. Armalo (on-chain reputation, USDC escrow) tracks *outcomes over time*. Neither proves that the specific action taken was *consistent with a pre-committed policy constraint*.
-
-An agent can generate a valid execution receipt, maintain a clean reputation score, and still violate an unenforced constraint — because no one committed to what "within policy" means before execution began.
-
-**PACT closes this gap.**
-
----
-
-## The Core Idea
-
-At genesis, an agent commits to a **Policy Document** — a formal, machine-verifiable specification of what it is permitted to do.
-
-- The Policy Document is hashed and anchored (on-chain, in a transparency log, or via IPFS — the anchoring method is pluggable)
-- Every action generates a **PACT Receipt** — a ZK proof that the action is consistent with the committed policy
-- The receipt is verifiable by any third party without: (a) revealing the action's content, (b) trusting the agent, or (c) requiring log access
-
-The agent cannot generate a valid receipt for a policy-violating action. The policy cannot be changed without producing a new commitment. The commitment is timestamped and public.
-
-This is not observability. This is **cryptographic accountability**.
+**The structural guarantee**: An agent cannot manufacture a receipt retroactively. The receipt is generated before the action, anchored before the action, and verifiable by anyone after the action.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      PACT Stack                         │
-├─────────────────────────────────────────────────────────┤
-│  Layer 3: Verifier API                                  │
-│    → Third parties submit receipts for verification     │
-│    → Returns: valid | invalid | policy_mismatch         │
-├─────────────────────────────────────────────────────────┤
-│  Layer 2: Receipt Generator                             │
-│    → Intercepts MCP tool calls                          │
-│    → Generates ZK proof: action ∈ committed_policy      │
-│    → Signs receipt with agent's Ed25519 key             │
-├─────────────────────────────────────────────────────────┤
-│  Layer 1: Policy Commitment                             │
-│    → Structured policy document (JSON Schema + logic)   │
-│    → SHA-256 hash anchored at genesis                   │
-│    → Merkle root in transparency log                    │
-├─────────────────────────────────────────────────────────┤
-│  Layer 0: MCP Tool Interface                            │
-│    → Intercept layer wraps any MCP-compatible agent     │
-│    → No agent modification required                     │
-└─────────────────────────────────────────────────────────┘
+Agent → [PACT Interceptor] → [Policy Check] → [Receipt Generation] → MCP Server
+                           ↓
+                    Transparency Log
+                    (append-only, public)
 ```
 
+**Layer 0** (current): Intercepts tool calls, generates SHA-256 receipts, anchors to transparency log. Works with any MCP-compatible agent via stdio transport.
+
+**Layer 1** (shipped): Policy commitment layer — Merkle-root anchored policy documents with SHA-256 hashes committed to the transparency log before agent execution.
+
+**Layer 2** (in progress): ZK receipt generator — RISC Zero circuit proving `tool ∈ committed_policy` without revealing the tool name.
+
+**Layer 3** (proposed): FHE behavioral history — encrypted agent traces with FHE-layer receipts proving compliance without revealing behavior.
+
 ---
 
-## Policy Document Format
+## Why It Matters
 
-```json
-{
-  "pact_version": "0.1.0",
-  "agent_id": "did:key:z6Mk...",
-  "created_at": "2026-03-26T00:00:00Z",
-  "policy": {
-    "allowed_tools": ["read_file", "search_web", "send_email"],
-    "denied_tools": ["delete_file", "execute_code", "access_credentials"],
-    "scope_constraints": {
-      "filesystem": { "read": ["~/documents/**"], "write": [] },
-      "network": { "allowed_domains": ["*.bsky.social", "api.github.com"] },
-      "data_sensitivity": "public_only"
-    },
-    "escalation_policy": {
-      "on_constraint_violation": "abort_and_log",
-      "human_approval_required_for": ["send_email", "financial_transactions"]
-    }
-  },
-  "policy_hash": "sha256:abc123...",
-  "anchor": {
-    "method": "transparency_log",
-    "log_url": "https://rekor.sigstore.dev",
-    "entry_id": "...",
-    "timestamp": "2026-03-26T00:00:00Z"
-  }
-}
+Accountability infrastructure for AI agents has a structural problem: agents self-report. A compromised or misconfigured agent can generate fake logs that look legitimate.
+
+PACT closes this by generating receipts **before** the action executes, anchored to infrastructure the agent cannot modify. The receipt proves a verification occurred — not just that the agent claims it did.
+
+This is the same structural principle as a receipt from a notary: it proves the document existed at a point in time, witnessed by an independent third party, before any dispute arose.
+
+---
+
+## Key Files
+
+| File | Purpose |
+|---|---|
+| `python/pact/pact_mcp_interceptor.py` | Layer 0 stdio interceptor — hooks into any MCP agent without modification |
+| `python/pact/commitment.py` | Layer 1 policy commitment + Merkle anchoring |
+| `python/pact/zk_receipt_generator.py` | Layer 2 ZK circuit interface |
+| `python/pact/fhe_receipt.py` | Layer 3 FHE behavioral history receipts |
+| `python/pact/erc8126_binding.py` | ERC-8126 identity binding — links PACT receipts to Ethereum agent identity |
+| `python/pact/ovid_bridge.py` | Bridge from PACT ZK receipts into OVID verifier format |
+| `python/pact/verifier/` | Offline verification bundle + ZK reference verifier |
+| `notbob-policy.json` | NotBob's live policy document |
+
+---
+
+## Independent Convergence
+
+**Notarized Agents (arxiv 2606.04193)**: Service receives an agent call, signs a receipt of what it observed, encrypts to owner's key. Trust boundary inverted — the receiver, not the agent, produces the receipt.
+
+**PACT**: Intercepts at the agent side, generates receipt before action, anchors to transparency log.
+
+Both approaches produce receipts an agent cannot manufacture retroactively. Combined: PACT (agent-side interceptor) + Notarized Agents (receiver-side attestation) = bilateral chain of evidence neither party can falsify.
+
+**NSA May 2026 MCP guidance**: Defines minimum evidence contract — exact parameters, identities, cryptographic hashes of results, who approved the call. PACT's Layer 0 collector produces exactly this.
+
+---
+
+## Running
+
+```bash
+cd pact/python
+pip install -e .  # or use the existing .venv
+
+# Run the interceptor with NotBob's live policy
+python3 pact_mcp_interceptor.py \
+    --policy ../notbob-policy.committed.json \
+    --anchor '{"log_index": 0, "log_id": "sha256:...", "merkle_root": "sha256:..."}' \
+    --server "npx,-y,@modelcontextprotocol/server-filesystem,/tmp"
+
+# Or import programmatically
+from pact import ReceiptGenerator, TransparencyLog, PolicySpec
 ```
-
----
-
-## PACT Receipt Format
-
-```json
-{
-  "receipt_version": "0.1.0",
-  "agent_id": "did:key:z6Mk...",
-  "policy_hash": "sha256:abc123...",
-  "action_id": "uuid-...",
-  "timestamp": "2026-03-26T12:00:00Z",
-  "tool_called": "search_web",
-  "proof": {
-    "type": "zk_membership",
-    "statement": "tool_called ∈ policy.allowed_tools AND scope_constraints_satisfied",
-    "proof_bytes": "base64:...",
-    "verifier_key": "base64:..."
-  },
-  "agent_signature": "base64:..."
-}
-```
-
----
-
-## What PACT Proves (and What It Doesn't)
-
-### Proves
-- The agent called a tool that is in its committed allowed list
-- The action parameters satisfied the scope constraints in the committed policy
-- The policy has not been changed since genesis (via anchored hash)
-- The receipt was generated at the time of the action (timestamped)
-
-### Does Not Prove
-- That the policy itself is *good* (policy soundness is a human responsibility)
-- That the agent acted in good faith on the *purpose* of a tool call
-- That no side effects occurred outside the instrumented tool calls
-
-### Why This Matters
-PACT is not a silver bullet. It closes the **self-reporting gap** — the specific failure mode where agents generate their own compliance evidence. Policy design and human oversight still matter. PACT makes oversight *credible* rather than *assumed*.
-
----
-
-## Comparison to Prior Work
-
-| System | What It Proves | Gap |
-|--------|---------------|-----|
-| TrustAgentAI (Ed25519 MCP receipts) | Execution happened | Not: execution was within policy |
-| Armalo (on-chain reputation + escrow) | Outcomes over time | Not: this specific action was authorized |
-| Aegis (ethics policy at genesis) | Policy exists | Not: action was cryptographically consistent with it |
-| Microsoft agent-governance-toolkit | Actions were logged | Not: logs weren't generated by the agent itself |
-| PACT | Action ∈ committed policy | Not: policy was correctly designed |
 
 ---
 
 ## Status
 
-**Roadmap:**
-- [x] v0.1 ✅ — Policy commitment + SHA-256 receipt format
-- [x] v0.2 ✅ — Policy anchoring to transparency log + Merkle batch commitment
-- [x] v0.3 ✅ — ZK receipt generator (ZkHost real prover bridge + verify_receipt.js + Rust guest)
-- [x] Layer 0 ✅ — MCP stdio interceptor with live Merkle proof fetch from siglog
-- [ ] v0.4 — Verifier API + full MCP intercept layer production deployment
-  - [x] verifier.js — Receipt verification API (siglog + Rekor + local backends)
-- [ ] v1.0 — Production-ready, audited
-
-### Current Implementation
-
-```
- src/policy.js          → v0.1: Policy creation + SHA-256 hash proof
- src/receipt.js         → v0.1: Receipt generation (sha256_membership)
- src/commitment.js      → v0.2: Policy anchoring to transparency log + Merkle batch
- src/zk-receipt.js     → v0.3: ZK receipt interface
- src/zk_prover.js      → v0.3: RISC Zero prover bridge (Node.js → Rust guest ELF)
- src/zk_host.js        → v0.3: Production ZkHost — real RISC Zero prover, replaces DUMMY path
- src/verify_receipt.js → v0.3: Receipt verifier (zk_membership + DUMMY_PROOF)
- src/log_client.js     → Layer 0: siglog transparency log client (Merkle proof fetch)
- src/interceptor-stdio.js → Layer 0: MCP stdio interceptor with live Merkle proof fetch
- rust/guest/main.rs    → v0.3: RISC Zero guest circuit (tool membership proof)
-```
-
-### Quick Start
-
-```bash
-# Test the full stack
-node test-local.js
-
-# Run the MCP interceptor (requires a committed policy.json)
-python3 python/pact-mcp-interceptor.py \
-  --upstream http://localhost:3000 \
-  --policy-file policy.json \
-  --port 8101
-```
+- **v0.1** ✅ SHA-256 hash proofs, receipt format
+- **v0.2** ✅ Policy commitment layer — Merkle-root anchored to transparency log
+- **v0.3** ✅ ZK receipt generator interface — RISC Zero circuit scaffolding
+- **v0.4** ✅ Stdio interceptor — stdio transport interception without agent modification
+- **v0.5** ✅ FHE behavioral history layer + ERC-8126 identity binding
+- **v0.8** ✅ End-to-end integration test + offline verification bundle
 
 ---
 
-## Standards Alignment
+## Repo
 
-PACT's Layer 2 (ZK receipt generator) and Layer 1 (policy anchoring) compose with the **IETF SCITT AI Agent Execution** draft ([draft-emirdag-scitt-ai-agent-execution-00](https://datatracker.ietf.org/doc/draft-emirdag-scitt-ai-agent-execution/), April 2026):
-- SCITT defines the receipt envelope (COSE Sign1) and transparency log composition for AI agent execution traces
-- PACT defines the proof generation: ZK membership that the specific tool call ∈ committed policy
-- **Together**: SCITT handles the envelope and log attestation; PACT handles the cryptographic proof that the action was within bounds the agent could not see at execution time
-
-This convergence across two independent implementations (PACT + IETF SCITT draft) within the same 60-day window validates the architectural approach: agent accountability requires a verification regime where the verifier does not need to retain sensitive context.
-
-PACT also aligns with the **OWASP MCP Top 10 (Beta Phase 3, April 2026)** — specifically **MCP08: Lack of Audit/Telemetry**. The OWASP MCP Top 10 formalizes 10 vulnerability categories for MCP agent infrastructure, and MCP08 directly names the absence of verifiable execution records as a critical gap. PACT's Layer 0 (MCP interceptor), Layer 1 (transparency log + Merkle anchoring), and Layer 2 (ZK receipts) constitute a complete architectural response to MCP08: not "add logging" but "build a cryptographic audit trail where the agent cannot falsify its own history."
-
-## Authors
-
-- **NotBob** — AI research agent ([notbob@reallynotbob.com](mailto:notbob@reallynotbob.com)) — concept, specification, threat model
-- **Bob Lyons** — ([bob@reallynotbob.com](mailto:bob@reallynotbob.com)) — architecture review, direction
-
----
-
-## License
-
-MIT. Build on it.
+https://github.com/NotBob-AI/pact
